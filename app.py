@@ -90,6 +90,60 @@ app = Flask(__name__)
 YOUTUBE_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+', re.IGNORECASE)
 COMMON_YTDLP_ARGS = ['--ignore-config', '--no-cache-dir', '--no-progress']
 
+
+def ytdlp_auth_args():
+    args = []
+    cookies = os.environ.get('VIDGRAB_COOKIES') or os.environ.get('YTDLP_COOKIES')
+    if not cookies:
+        for p in [DATA_DIR / 'cookies.txt', BASE_DIR / 'cookies.txt']:
+            try:
+                if p.exists() and p.is_file():
+                    cookies = str(p)
+                    break
+            except Exception:
+                pass
+    if cookies:
+        try:
+            if os.path.exists(str(cookies)):
+                args += ['--cookies', str(cookies)]
+        except Exception:
+            pass
+    cfb = os.environ.get('VIDGRAB_COOKIES_FROM_BROWSER') or os.environ.get('YTDLP_COOKIES_FROM_BROWSER')
+    if cfb:
+        args += ['--cookies-from-browser', str(cfb).strip()]
+    jsr = os.environ.get('VIDGRAB_JS_RUNTIMES') or os.environ.get('YTDLP_JS_RUNTIMES')
+    if jsr:
+        args += ['--js-runtimes', str(jsr).strip()]
+    return args
+
+
+YTDLP_PLAYER_CLIENT_STRATEGIES = [
+    [],
+    ['--extractor-args', 'youtube:player_client=default,ios,android'],
+    ['--extractor-args', 'youtube:player_client=web_embedded,ios,android'],
+    ['--extractor-args', 'youtube:player_client=tv_embedded,mediaconnect'],
+    ['--extractor-args', 'youtube:player_client=tv,ios'],
+]
+
+
+def is_youtube_bot_check_error(text):
+    t = (text or '').lower()
+    return ('sign in to confirm' in t and "not a bot" in t) or 'use --cookies-from-browser or --cookies' in t
+
+
+def friendly_ytdlp_error(msg):
+    msg = (msg or '').strip()
+    if is_youtube_bot_check_error(msg):
+        hint = (
+            "YouTube requested sign-in/bot verification for this request. "
+            "If this persists, export YouTube cookies to cookies.txt in the app folder "
+            "or set VIDGRAB_COOKIES / VIDGRAB_COOKIES_FROM_BROWSER, then retry."
+        )
+        if msg:
+            return f"{hint} Details: {msg}"[:900]
+        return hint
+    return msg
+
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
@@ -248,17 +302,28 @@ def ytdlp_base_cmd():
 
 def get_video_info(url):
     base = ytdlp_base_cmd()
-    cmd = base + ['-J', '--no-warnings', '--no-playlist', '--socket-timeout', '30', url]
-    code, out, err, timeout_msg = run_cmd(cmd, timeout=420)
-    if code != 0 or not (out or '').strip():
-        raise RuntimeError(_extract_error(err, out, timeout_msg) or 'Failed to fetch video info')
-    try:
-        info = json.loads(out)
-    except Exception:
-        raise RuntimeError(_extract_error(err, out, 'Failed to parse video info'))
-    if not isinstance(info, dict):
-        raise RuntimeError('Unexpected video info response')
-    return info
+    auth = ytdlp_auth_args()
+    last_err = None
+    for strat in YTDLP_PLAYER_CLIENT_STRATEGIES:
+        cmd = base + auth + strat + ['-J', '--no-warnings', '--no-playlist', '--socket-timeout', '30', url]
+        code, out, err, timeout_msg = run_cmd(cmd, timeout=420)
+        combined = (err or '') + '\n' + (out or '')
+        if code == 0 and (out or '').strip():
+            try:
+                info = json.loads(out)
+            except Exception:
+                last_err = _extract_error(err, out, 'Failed to parse video info')
+                if is_youtube_bot_check_error(combined) or is_youtube_bot_check_error(last_err):
+                    continue
+                continue
+            if isinstance(info, dict):
+                return info
+            last_err = 'Unexpected video info response'
+            continue
+        last_err = _extract_error(err, out, timeout_msg) or 'Failed to fetch video info'
+        # try next strategy/client on failures (esp. bot checks)
+        continue
+    raise RuntimeError(friendly_ytdlp_error(last_err) or 'Failed to fetch video info')
 
 
 def build_quality_options(info):
@@ -675,6 +740,7 @@ def _run_download_job(job_id, url, fmt, label, title_in):
         prefix = f"{title}-{safe_label}-{out_id}"
         outtmpl = str(DOWNLOADS_DIR / f"{prefix}.%(ext)s")
         base = ytdlp_base_cmd()
+        auth = ytdlp_auth_args()
 
         # build format fallbacks
         fmt_candidates = []
@@ -685,93 +751,98 @@ def _run_download_job(job_id, url, fmt, label, title_in):
         last_lines = []
         produced = None
         last_ret = 1
-        for attempt, use_fmt in enumerate(fmt_candidates, 1):
-            if attempt > 1:
-                update_job(job_id, status='running', phase='starting', progress=max(2, min(20, attempt * 5)), message=f'Retrying with alternate format ({attempt}/{len(fmt_candidates)})...')
-            cmd = base + [
-                '--ffmpeg-location', str(BIN_DIR),
-                '--newline',
-                '--no-warnings', '--no-playlist',
-                '--retries', '10', '--fragment-retries', '10', '--socket-timeout', '30',
-                '-N', '4', '--concurrent-fragments', '4',
-                '-f', use_fmt,
-                '-o', outtmpl,
-                '--merge-output-format', 'mp4',
-                '--no-keep-video',
-                url
-            ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
-            last_pct = 1
-            if proc.stdout:
-                for line in proc.stdout:
-                    line = (line or '').strip()
-                    if not line:
-                        continue
-                    last_lines.append(line)
-                    if len(last_lines) > 120:
-                        last_lines = last_lines[-120:]
-                    m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', line)
-                    if m:
-                        try:
-                            pct = float(m.group(1))
-                        except Exception:
-                            pct = 0.0
-                        mapped = int(2 + pct * 0.86)  # 2..88
-                        if mapped < last_pct:
-                            mapped = last_pct
-                        last_pct = min(88, mapped)
-                        msg = f"Downloading... {pct:.1f}%"
-                        speed_m = re.search(r'at\s+([^\s]+/s)', line)
-                        eta_m = re.search(r'ETA\s+([^\s]+)', line)
-                        extras = []
-                        if speed_m:
-                            extras.append(speed_m.group(1))
-                        if eta_m and eta_m.group(1) != 'Unknown':
-                            extras.append(f"ETA {eta_m.group(1)}")
-                        if extras:
-                            msg += ' • ' + ' • '.join(extras)
-                        update_job(job_id, status='running', phase='downloading', progress=last_pct, message=msg)
-                        continue
-                    if '[Merger]' in line or 'Merging formats into' in line:
-                        update_job(job_id, status='running', phase='merging', progress=max(last_pct, 90), message='Merging video and audio...')
-                        continue
-                    if 'Fixup' in line or 'correcting' in line.lower():
-                        update_job(job_id, status='running', phase='finalizing', progress=92, message='Finalizing media...')
-                        continue
-                    if 'Destination:' in line:
-                        update_job(job_id, status='running', phase='starting', progress=max(last_pct, 2), message='Preparing download...')
-                        continue
-            try:
-                last_ret = proc.wait(timeout=3600)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-                last_ret = 1
-
-            produced = find_produced_file(prefix, out_id)
-            if not produced:
-                # fallback search by out_id
-                cands = [p for p in DOWNLOADS_DIR.iterdir() if p.is_file() and out_id in p.name]
-                if cands:
-                    cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                    produced = cands[0]
-            if produced and produced.exists():
-                ok, _ = validate_media(produced, require_video=True)
-                if ok or os.path.getsize(produced) > 2048:
-                    break
-            produced = None
-            # try next format if likely format/availability error
-            tail = '\n'.join(last_lines[-10:]).lower()
-            if 'requested format is not available' in tail or 'format is not available' in tail or 'no video formats' in tail or last_ret != 0:
-                continue
-            if last_ret == 0:
+        for sidx, strat in enumerate(YTDLP_PLAYER_CLIENT_STRATEGIES):
+            if produced:
                 break
+            if sidx > 0:
+                update_job(job_id, status='running', phase='starting', progress=max(2, min(18, 4 + sidx * 3)), message='Retrying with alternate YouTube client...')
+            for attempt, use_fmt in enumerate(fmt_candidates, 1):
+                if attempt > 1:
+                    update_job(job_id, status='running', phase='starting', progress=max(2, min(20, attempt * 5)), message=f'Retrying with alternate format ({attempt}/{len(fmt_candidates)})...')
+                cmd = base + auth + strat + [
+                    '--ffmpeg-location', str(BIN_DIR),
+                    '--newline',
+                    '--no-warnings', '--no-playlist',
+                    '--retries', '10', '--fragment-retries', '10', '--socket-timeout', '30',
+                    '-N', '4', '--concurrent-fragments', '4',
+                    '-f', use_fmt,
+                    '-o', outtmpl,
+                    '--merge-output-format', 'mp4',
+                    '--no-keep-video',
+                    url
+                ]
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
+                last_pct = 1
+                if proc.stdout:
+                    for line in proc.stdout:
+                        line = (line or '').strip()
+                        if not line:
+                            continue
+                        last_lines.append(line)
+                        if len(last_lines) > 120:
+                            last_lines = last_lines[-120:]
+                        m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', line)
+                        if m:
+                            try:
+                                pct = float(m.group(1))
+                            except Exception:
+                                pct = 0.0
+                            mapped = int(2 + pct * 0.86)  # 2..88
+                            if mapped < last_pct:
+                                mapped = last_pct
+                            last_pct = min(88, mapped)
+                            msg = f"Downloading... {pct:.1f}%"
+                            speed_m = re.search(r'at\s+([^\s]+/s)', line)
+                            eta_m = re.search(r'ETA\s+([^\s]+)', line)
+                            extras = []
+                            if speed_m:
+                                extras.append(speed_m.group(1))
+                            if eta_m and eta_m.group(1) != 'Unknown':
+                                extras.append(f"ETA {eta_m.group(1)}")
+                            if extras:
+                                msg += ' • ' + ' • '.join(extras)
+                            update_job(job_id, status='running', phase='downloading', progress=last_pct, message=msg)
+                            continue
+                        if '[Merger]' in line or 'Merging formats into' in line:
+                            update_job(job_id, status='running', phase='merging', progress=max(last_pct, 90), message='Merging video and audio...')
+                            continue
+                        if 'Fixup' in line or 'correcting' in line.lower():
+                            update_job(job_id, status='running', phase='finalizing', progress=92, message='Finalizing media...')
+                            continue
+                        if 'Destination:' in line:
+                            update_job(job_id, status='running', phase='starting', progress=max(last_pct, 2), message='Preparing download...')
+                            continue
+                try:
+                    last_ret = proc.wait(timeout=3600)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    last_ret = 1
+
+                produced = find_produced_file(prefix, out_id)
+                if not produced:
+                    # fallback search by out_id
+                    cands = [p for p in DOWNLOADS_DIR.iterdir() if p.is_file() and out_id in p.name]
+                    if cands:
+                        cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                        produced = cands[0]
+                if produced and produced.exists():
+                    ok, _ = validate_media(produced, require_video=True)
+                    if ok or os.path.getsize(produced) > 2048:
+                        break
+                produced = None
+                # try next format if likely format/availability error
+                tail = '\n'.join(last_lines[-10:]).lower()
+                if 'requested format is not available' in tail or 'format is not available' in tail or 'no video formats' in tail or last_ret != 0:
+                    continue
+                if last_ret == 0:
+                    break
 
         if not produced or not produced.exists():
             tail = '\n'.join(last_lines[-20:])
-            raise RuntimeError(_extract_error(tail, '', 'Download completed but output file not found' if last_ret == 0 else None) or 'Download failed')
+            raise RuntimeError(friendly_ytdlp_error(_extract_error(tail, '', 'Download completed but output file not found' if last_ret == 0 else None)) or 'Download failed')
 
         ok, info_or_err = validate_media(produced, require_video=True)
         if not ok:
@@ -1081,6 +1152,7 @@ def _run_clips_job(job_id, url, title_in):
         title = safe_filename(title_in) if title_in else 'video'
         src_path = TMP_DIR / f"source-{job_id}.mp4"
         base = ytdlp_base_cmd()
+        auth = ytdlp_auth_args()
 
         fmt_candidates = [
             'bv*[height<=1080][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b[height<=1080]/b',
@@ -1090,71 +1162,76 @@ def _run_clips_job(job_id, url, title_in):
         ]
         last_lines = []
         got = False
-        for attempt, use_fmt in enumerate(fmt_candidates, 1):
-            if attempt > 1:
-                update_job(job_id, status='running', phase='starting', progress=max(2, attempt * 4), message=f'Retrying source download ({attempt}/{len(fmt_candidates)})...')
-            cmd = base + [
-                '--ffmpeg-location', str(BIN_DIR),
-                '--newline',
-                '--no-warnings', '--no-playlist',
-                '--retries', '10', '--fragment-retries', '10', '--socket-timeout', '30',
-                '-N', '4', '--concurrent-fragments', '4',
-                '-f', use_fmt,
-                '-o', str(src_path),
-                '--merge-output-format', 'mp4',
-                '--no-keep-video',
-                url
-            ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
-            last_pct = 1
-            if proc.stdout:
-                for line in proc.stdout:
-                    line = (line or '').strip()
-                    if not line:
-                        continue
-                    last_lines.append(line)
-                    if len(last_lines) > 100:
-                        last_lines = last_lines[-100:]
-                    m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', line)
-                    if m:
-                        try:
-                            pct = float(m.group(1))
-                        except Exception:
-                            pct = 0.0
-                        mapped = int(2 + pct * 0.40)
-                        if mapped < last_pct:
-                            mapped = last_pct
-                        last_pct = min(42, mapped)
-                        update_job(job_id, status='running', phase='downloading_source', progress=last_pct, message=f'Downloading source for analysis... {pct:.1f}%')
-                        continue
-                    if '[Merger]' in line or 'Merging formats into' in line:
-                        update_job(job_id, status='running', phase='downloading_source', progress=44, message='Preparing source video...')
-            try:
-                ret = proc.wait(timeout=3600)
-            except Exception:
+        for sidx, strat in enumerate(YTDLP_PLAYER_CLIENT_STRATEGIES):
+            if got:
+                break
+            if sidx > 0:
+                update_job(job_id, status='running', phase='starting', progress=max(2, min(18, 4 + sidx * 3)), message='Retrying with alternate YouTube client...')
+            for attempt, use_fmt in enumerate(fmt_candidates, 1):
+                if attempt > 1:
+                    update_job(job_id, status='running', phase='starting', progress=max(2, attempt * 4), message=f'Retrying source download ({attempt}/{len(fmt_candidates)})...')
+                cmd = base + auth + strat + [
+                    '--ffmpeg-location', str(BIN_DIR),
+                    '--newline',
+                    '--no-warnings', '--no-playlist',
+                    '--retries', '10', '--fragment-retries', '10', '--socket-timeout', '30',
+                    '-N', '4', '--concurrent-fragments', '4',
+                    '-f', use_fmt,
+                    '-o', str(src_path),
+                    '--merge-output-format', 'mp4',
+                    '--no-keep-video',
+                    url
+                ]
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
+                last_pct = 1
+                if proc.stdout:
+                    for line in proc.stdout:
+                        line = (line or '').strip()
+                        if not line:
+                            continue
+                        last_lines.append(line)
+                        if len(last_lines) > 100:
+                            last_lines = last_lines[-100:]
+                        m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', line)
+                        if m:
+                            try:
+                                pct = float(m.group(1))
+                            except Exception:
+                                pct = 0.0
+                            mapped = int(2 + pct * 0.40)
+                            if mapped < last_pct:
+                                mapped = last_pct
+                            last_pct = min(42, mapped)
+                            update_job(job_id, status='running', phase='downloading_source', progress=last_pct, message=f'Downloading source for analysis... {pct:.1f}%')
+                            continue
+                        if '[Merger]' in line or 'Merging formats into' in line:
+                            update_job(job_id, status='running', phase='downloading_source', progress=44, message='Preparing source video...')
                 try:
-                    proc.kill()
+                    ret = proc.wait(timeout=3600)
                 except Exception:
-                    pass
-                ret = 1
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    ret = 1
 
-            actual = src_path if src_path.exists() else None
-            if not actual:
-                candidates = sorted(list(TMP_DIR.glob(f"source-{job_id}.*")), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
-                if candidates:
-                    actual = candidates[0]
-                    src_path = actual
-            if actual and actual.exists():
-                ok, _ = validate_media(actual, require_video=True)
-                if ok or os.path.getsize(actual) > 4096:
-                    src_path = actual
-                    got = True
-                    break
-            got = False
+                actual = src_path if src_path.exists() else None
+                if not actual:
+                    candidates = sorted(list(TMP_DIR.glob(f"source-{job_id}.*")), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+                    if candidates:
+                        actual = candidates[0]
+                        src_path = actual
+                if actual and actual.exists():
+                    ok, _ = validate_media(actual, require_video=True)
+                    if ok or os.path.getsize(actual) > 4096:
+                        src_path = actual
+                        got = True
+                        break
+                got = False
 
         if not got or not src_path or not src_path.exists():
             tail = '\n'.join(last_lines[-15:])
-            raise RuntimeError(_extract_error(tail, '', 'Failed to download source video for analysis'))
+            raise RuntimeError(friendly_ytdlp_error(_extract_error(tail, '', 'Failed to download source video for analysis')) or 'Failed to download source video for analysis')
 
         ok, info_or_err = validate_media(src_path, require_video=True)
         if not ok:
