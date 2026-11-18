@@ -110,38 +110,68 @@
           </div>
         </div>
 
-        <div class="workspace-tabs">
-          <button class="wtab active" data-wtab="qualities" type="button">Full Video</button>
-          <button class="wtab" data-wtab="clips" type="button">Viral Clips</button>
+        <div class="workspace-tabs" role="tablist" aria-label="Download options">
+          <button class="wtab active" id="wtab-full-video" data-wtab="qualities" type="button" role="tab" aria-selected="true" aria-controls="wtab-qualities" tabindex="0">
+            <span class="wtab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg></span>
+            <span class="wtab-copy"><strong>Full Video</strong><small>Choose any quality</small></span>
+            <span class="wtab-arrow" aria-hidden="true">›</span>
+          </button>
+          <button class="wtab" id="wtab-viral-clips" data-wtab="clips" type="button" role="tab" aria-selected="false" aria-controls="wtab-clips" tabindex="-1">
+            <span class="wtab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.7 7.6L20 18M8.7 16.4L20 6"/></svg></span>
+            <span class="wtab-copy"><strong>Viral Clips</strong><small>Find the best moments</small></span>
+            <span class="wtab-arrow" aria-hidden="true">›</span>
+          </button>
         </div>
 
-        <div id="wtab-qualities" class="wtab-panel active">
-          <section class="ytx-pv-section">
+        <div id="wtab-qualities" class="wtab-panel active" role="tabpanel" aria-labelledby="wtab-full-video" tabindex="0">
+          <section class="ytx-pv-section download-section">
             <div class="ytx-pv-section-head">
-              <h2><span class="ytx-pv-section-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg></span> Available Qualities</h2>
+              <div class="section-title-wrap">
+                <span class="ytx-pv-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg></span>
+                <div><p class="section-kicker">Direct download</p><h2>Available Qualities</h2></div>
+              </div>
               <span class="ytx-pv-section-count" id="quality-count">0 options</span>
             </div>
-            <p class="ytx-pv-section-help">All detected YouTube formats are listed below (e.g. 720p, 1080p, 1440p, 4K when available). Sizes are estimates.</p>
-            <div id="quality-list" class="ytx-format-grid"></div>
+            <div class="section-intro-row">
+              <p class="ytx-pv-section-help">Pick a quality to start a direct download. Formats are selected from the exact metadata for this video.</p>
+              <span class="info-chip">Sizes are estimates</span>
+            </div>
+            <div id="quality-list" class="ytx-format-grid" aria-live="polite"></div>
           </section>
         </div>
 
-        <div id="wtab-clips" class="wtab-panel">
-          <section class="ytx-pv-section">
+        <div id="wtab-clips" class="wtab-panel" role="tabpanel" aria-labelledby="wtab-viral-clips" tabindex="0">
+          <section class="ytx-pv-section clips-section">
             <div class="ytx-pv-section-head">
-              <h2><span class="ytx-pv-section-icon ytx-pv-section-icon--image"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h10M4 17h16"/></svg></span> Viral Clips Studio</h2>
+              <div class="section-title-wrap">
+                <span class="ytx-pv-section-icon ytx-pv-section-icon--image" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h10M4 17h16"/></svg></span>
+                <div><p class="section-kicker">Local moment finder</p><h2>Viral Clips Studio</h2></div>
+              </div>
               <span class="ytx-pv-section-count" id="clips-count">0 clips</span>
             </div>
-            <p class="ytx-pv-section-help">Analyzes the full video locally (audio energy + scene changes, no AI) to generate multiple high-potential clips for long videos. Faster processing enabled.</p>
+            <div class="clips-intro">
+              <div class="clips-intro-copy">
+                <p class="ytx-pv-section-help">Scan the full video for high-potential moments using audio energy and scene changes. No AI, no external APIs.</p>
+                <div class="feature-pills"><span>Local analysis</span><span>Faster mode</span><span>No AI</span></div>
+              </div>
+            </div>
 
-            <div id="clips-gate" class="clips-gate hidden"></div>
+            <div id="clips-gate" class="clips-gate hidden" role="status">
+              <span class="clips-gate-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
+              <div class="clips-gate-copy">
+                <strong id="clips-gate-title">Clip downloads are blocked</strong>
+                <p id="clips-gate-detail">Automated safety checks detected potential copyright signals for this video.</p>
+                <small id="clips-gate-footer">Full video download is still available if you have rights to use it.</small>
+              </div>
+            </div>
 
             <div class="clips-toolbar">
-              <button id="generate-clips-btn" class="ytx-btn ytx-btn--primary" type="button">
+              <button id="generate-clips-btn" class="ytx-btn ytx-btn--primary clips-generate-btn" type="button" aria-describedby="clips-note">
+                <span class="ytx-btn-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.7 7.6L20 18M8.7 16.4L20 6"/></svg></span>
                 <span class="ytx-btn-text">Generate Viral Clips</span>
                 <span class="ytx-btn-loading" aria-hidden="true"><span class="ytx-spinner"></span></span>
               </button>
-              <span id="clips-note" class="clips-note">Clip downloads require passing the automated copyright safety pre-check.</span>
+              <div class="clips-toolbar-note"><span class="clips-note-dot" aria-hidden="true"></span><span id="clips-note" class="clips-note">Load a video to check clip eligibility.</span></div>
             </div>
 
             <div id="clips-progress" class="clips-progress hidden">
@@ -150,7 +180,7 @@
             </div>
 
             <div id="clips-error" class="ytx-error hidden" role="alert"></div>
-            <div id="clips-list" class="clips-grid"></div>
+            <div id="clips-list" class="clips-grid" aria-live="polite"></div>
           </section>
         </div>
       </section>

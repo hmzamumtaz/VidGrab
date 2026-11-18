@@ -34,6 +34,10 @@
   const clipsProgressFill = $('clips-progress-fill');
   const clipsError = $('clips-error');
   const clipsNote = $('clips-note');
+  const clipsNoteDot = document.querySelector('.clips-note-dot');
+  const clipsGateTitle = $('clips-gate-title');
+  const clipsGateDetail = $('clips-gate-detail');
+  const clipsGateFooter = $('clips-gate-footer');
 
   const state = {
     url: '',
@@ -133,17 +137,72 @@
     return `${m}:${String(sec).padStart(2,'0')}`;
   }
 
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  function shortResolution(q) {
+    const label = String(q?.label || '');
+    if (/4k|2160/i.test(label)) return '4K';
+    if (/1440/i.test(label)) return '1440';
+    const match = label.match(/(\d{3,4})p/i);
+    if (match) return match[1];
+    return 'HD';
+  }
+
+  function qualityHeight(q) {
+    const value = Number(q?.display_height ?? q?.height);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function recommendedQualityIndex(qualities) {
+    if (!qualities || qualities.length < 2) return -1;
+    const scored = qualities.map((q, index) => ({ index, height: qualityHeight(q) })).filter((x) => x.height > 0);
+    if (!scored.length) return -1;
+    const balanced = scored.filter((x) => x.height <= 1080).sort((a, b) => b.height - a.height)[0];
+    const best = scored.sort((a, b) => b.height - a.height)[0];
+    return balanced ? balanced.index : best.index;
+  }
+
+  function formatTags(q) {
+    const ext = String(q?.ext || 'mp4').toUpperCase();
+    const note = String(q?.note || '').split('•').map((x) => x.trim()).filter(Boolean);
+    return Array.from(new Set([ext, ...note]));
+  }
+
+  function emptyState(title, detail, icon) {
+    const box = el('div', 'empty-state');
+    const mark = el('span', 'empty-state-icon', '');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.innerHTML = icon;
+    const copy = el('div', '');
+    copy.appendChild(el('strong', '', title));
+    copy.appendChild(el('span', '', detail));
+    box.appendChild(mark);
+    box.appendChild(copy);
+    return box;
+  }
+
+  const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14"/></svg>';
+  const CLIPS_EMPTY_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.7 7.6L20 18M8.7 16.4L20 6"/></svg>';
+  const QUALITY_EMPTY_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg>';
+
   function setCopyright(cp) {
     state.copyright = cp || null;
     const allowed = !!(cp && cp.allow_clip_downloads);
     state.clipsAllowed = allowed;
     copyrightBox.classList.remove('safe', 'danger', 'neutral');
+    if (clipsNoteDot) clipsNoteDot.classList.remove('ready');
     if (!cp) {
       copyrightBox.classList.add('neutral');
       copyrightTitle.textContent = 'Copyright safety check';
       copyrightDetail.textContent = 'Automated metadata pre-check (no external APIs). Not a legal guarantee.';
       generateClipsBtn.disabled = true;
       clipsGate.classList.add('hidden');
+      clipsNote.textContent = 'Load a video to check clip eligibility.';
       return;
     }
     const reasons = (cp.reasons || []).filter(Boolean);
@@ -155,14 +214,18 @@
       copyrightDetail.textContent = `${reasonText}.${note}`;
       generateClipsBtn.disabled = false;
       clipsGate.classList.add('hidden');
-      clipsGate.textContent = '';
+      clipsNote.textContent = 'Ready to scan locally. Clip downloads stay subject to the automated safety check.';
+      if (clipsNoteDot) clipsNoteDot.classList.add('ready');
     } else {
       copyrightBox.classList.add('danger');
       copyrightTitle.textContent = 'Potential copyright detected — clip downloads blocked';
       copyrightDetail.textContent = `${reasonText}.${note}`;
       generateClipsBtn.disabled = true;
-      clipsGate.textContent = 'Clip generation/download is blocked for this video because automated safety checks detected potential copyright signals. Full video download may still be available if you have rights to use it.';
+      clipsGateTitle.textContent = 'Clip downloads are blocked for this video';
+      clipsGateDetail.textContent = `Automated pre-check found: ${reasonText}.${note}`;
+      clipsGateFooter.textContent = 'Full video download is still available if you have rights to use it.';
       clipsGate.classList.remove('hidden');
+      clipsNote.textContent = 'Clip downloads require passing the automated copyright safety pre-check.';
     }
   }
 
@@ -170,37 +233,56 @@
     qualityList.innerHTML = '';
     qualityCount.textContent = `${(qualities || []).length} options`;
     if (!qualities || !qualities.length) {
-      qualityList.innerHTML = '<div class="clips-note">No downloadable formats detected for this video.</div>';
+      qualityList.appendChild(emptyState('No downloadable formats found', 'Try another public YouTube video or refresh the page.', QUALITY_EMPTY_ICON));
       return;
     }
-    qualities.forEach((q) => {
-      const card = document.createElement('div');
-      card.className = 'ytx-format-card';
-      card.innerHTML = `
-        <div class="ytx-fmt-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg>
-        </div>
-        <div class="ytx-fmt-body">
-          <p class="ytx-fmt-title">${q.label || 'Unknown'}</p>
-          <div class="ytx-fmt-tags">
-            <span class="ytx-tag ytx-tag--blue">${q.ext || 'mp4'}</span>
-            <span class="ytx-tag">${q.note || 'MP4'}</span>
-            <span class="ytx-tag ytx-tag--green">${q.size_text || 'Size unavailable'}</span>
-          </div>
-          <div class="q-progress hidden">
-            <div class="q-progress-bar"><div class="q-progress-fill"></div></div>
-            <div class="q-progress-text">0%</div>
-          </div>
-        </div>
-        <div class="ytx-fmt-actions">
-          <button class="ytx-btn ytx-btn--primary q-dl" type="button"><span class="ytx-btn-text">Download</span><span class="ytx-btn-loading"><span class="ytx-spinner"></span></span></button>
-        </div>`;
-      const btn = card.querySelector('.q-dl');
-      const prog = card.querySelector('.q-progress');
-      const fill = card.querySelector('.q-progress-fill');
-      const ptxt = card.querySelector('.q-progress-text');
+    const recommended = recommendedQualityIndex(qualities);
+    qualities.forEach((q, index) => {
+      const card = el('article', `ytx-format-card${index === recommended ? ' is-recommended' : ''}`);
+      card.setAttribute('aria-label', `${q.label || 'Quality'} download`);
+      const top = el('div', 'ytx-format-top');
+      const icon = el('div', 'ytx-fmt-icon', shortResolution(q));
+      icon.setAttribute('aria-hidden', 'true');
+      const body = el('div', 'ytx-fmt-body');
+      const titleRow = el('div', 'ytx-fmt-title-row');
+      titleRow.appendChild(el('p', 'ytx-fmt-title', q.label || 'Unknown'));
+      if (index === recommended) titleRow.appendChild(el('span', 'ytx-rec-badge', 'Recommended'));
+      body.appendChild(titleRow);
+      body.appendChild(el('p', 'ytx-fmt-caption', `${q.source || 'YouTube'} format • direct MP4 download`));
+      const tags = el('div', 'ytx-fmt-tags');
+      formatTags(q).forEach((tag, tagIndex) => tags.appendChild(el('span', tagIndex === 0 ? 'ytx-tag ytx-tag--blue' : 'ytx-tag', tag)));
+      body.appendChild(tags);
+      const sizeBox = el('div', 'ytx-fmt-size');
+      const rawSize = String(q.size_text || 'Size unavailable');
+      sizeBox.appendChild(el('strong', '', rawSize));
+      sizeBox.appendChild(el('span', '', rawSize.startsWith('~') ? 'estimated size' : 'size unknown'));
+      top.appendChild(icon);
+      top.appendChild(body);
+      top.appendChild(sizeBox);
+
+      const actions = el('div', 'ytx-fmt-actions');
+      const btn = el('button', 'ytx-btn ytx-btn--primary q-dl');
+      btn.type = 'button';
+      btn.setAttribute('aria-label', `Download ${q.label || 'video'}`);
+      btn.innerHTML = `<span class="ytx-btn-icon" aria-hidden="true">${DOWNLOAD_ICON}</span><span class="ytx-btn-text">Download</span><span class="ytx-btn-loading" aria-hidden="true"><span class="ytx-spinner"></span></span>`;
+      actions.appendChild(btn);
+
+      const prog = el('div', 'q-progress hidden');
+      const bar = el('div', 'q-progress-bar');
+      const fill = el('div', 'q-progress-fill');
+      bar.appendChild(fill);
+      const ptxt = el('div', 'q-progress-text', '0%');
+      prog.appendChild(bar);
+      prog.appendChild(ptxt);
+
+      card.appendChild(top);
+      card.appendChild(actions);
+      card.appendChild(prog);
+
+      let downloadedUrl = '';
       btn.addEventListener('click', async () => {
         if (btn.disabled) return;
+        if (downloadedUrl) { window.location.href = downloadedUrl; return; }
         clearError();
         btn.disabled = true; btn.classList.add('loading');
         prog.classList.remove('hidden'); fill.style.width = '2%'; ptxt.textContent = 'Starting...';
@@ -220,11 +302,11 @@
             fill.style.width = `${p}%`; ptxt.textContent = j.message || `${Math.round(p)}%`;
           });
           const result = job.result || {};
+          downloadedUrl = result.download_url || '';
           fill.style.width = '100%'; ptxt.textContent = `Ready • ${result.size_text || ''}`.trim();
           btn.classList.remove('loading'); btn.disabled = false;
           btn.querySelector('.ytx-btn-text').textContent = 'Save File';
-          btn.onclick = () => { if (result.download_url) window.location.href = result.download_url; };
-          if (result.download_url) window.location.href = result.download_url;
+          if (downloadedUrl) window.location.href = downloadedUrl;
         } catch (e) {
           btn.classList.remove('loading'); btn.disabled = false;
           btn.querySelector('.ytx-btn-text').textContent = 'Retry';
@@ -242,28 +324,45 @@
     const list = clips || [];
     clipsCount.textContent = `${list.length} clips`;
     if (!list.length) {
-      clipsList.innerHTML = '<div class="clips-note">No clips generated yet.</div>';
+      clipsList.appendChild(emptyState('No clips generated yet', 'Generate clips to see preview cards and download options here.', CLIPS_EMPTY_ICON));
       return;
     }
     list.forEach((c) => {
       const dlAllowed = allowed && c.download_allowed !== false;
-      const item = document.createElement('div');
-      item.className = 'clip-item';
-      item.innerHTML = `
-        <div class="clip-media"><video controls preload="metadata" playsinline src="${c.download_url || ''}#t=0.1"></video></div>
-        <div class="clip-info">
-          <div class="clip-head">
-            <div>
-              <div class="clip-name">Clip ${c.index} • ${c.start_text || ''}–${c.end_text || ''}</div>
-              <div class="clip-sub">${c.duration_text || ''} • ${c.quality || 'Source'} • ${c.size_text || ''}</div>
-            </div>
-            <span class="clip-badge ${dlAllowed ? 'safe' : 'blocked'}">${dlAllowed ? 'Cleared' : 'Blocked'}</span>
-          </div>
-          <div class="clip-safe-note">${dlAllowed ? 'Passed automated pre-download safety check. Verify rights before sharing.' : 'Blocked by automated copyright safety check.'}</div>
-          <div class="clip-actions">
-            ${dlAllowed ? `<a class="ytx-btn ytx-btn--ghost" href="${c.download_url}" download>Download Clip</a>` : `<button class="ytx-btn ytx-btn--ghost" type="button" disabled>Download Unavailable</button>`}
-          </div>
-        </div>`;
+      const item = el('article', 'clip-item');
+      const media = el('div', 'clip-media');
+      const video = document.createElement('video');
+      video.controls = true;
+      video.preload = 'metadata';
+      video.playsInline = true;
+      if (c.download_url) video.src = `${c.download_url}#t=0.1`;
+      media.appendChild(video);
+
+      const info = el('div', 'clip-info');
+      const head = el('div', 'clip-head');
+      const copy = el('div', '');
+      const range = c.start_text && c.end_text ? ` • ${c.start_text}–${c.end_text}` : '';
+      copy.appendChild(el('div', 'clip-name', c.index ? `Clip ${c.index}${range}` : `${c.start_text || 'Clip'}${c.end_text ? `–${c.end_text}` : ''}`));
+      copy.appendChild(el('div', 'clip-sub', [c.duration_text, c.quality || 'Source', c.size_text].filter(Boolean).join(' • ')));
+      head.appendChild(copy);
+      head.appendChild(el('span', `clip-badge ${dlAllowed ? 'safe' : 'blocked'}`, dlAllowed ? 'Cleared' : 'Blocked'));
+      info.appendChild(head);
+      info.appendChild(el('div', 'clip-safe-note', dlAllowed ? 'Passed automated pre-download safety check. Verify rights before sharing.' : 'Blocked by automated copyright safety check.'));
+      const actions = el('div', 'clip-actions');
+      if (dlAllowed && c.download_url) {
+        const link = el('a', 'ytx-btn ytx-btn--primary', 'Download Clip');
+        link.href = c.download_url;
+        link.setAttribute('download', '');
+        actions.appendChild(link);
+      } else {
+        const btn = el('button', 'ytx-btn ytx-btn--ghost', 'Download Unavailable');
+        btn.type = 'button';
+        btn.disabled = true;
+        actions.appendChild(btn);
+      }
+      info.appendChild(actions);
+      item.appendChild(media);
+      item.appendChild(info);
       clipsList.appendChild(item);
     });
   }
@@ -284,7 +383,7 @@
       if (info.webpage_url) { openLink.href = info.webpage_url; openLink.classList.remove('hidden'); } else { openLink.classList.add('hidden'); }
       setCopyright(info.copyright);
       renderQualities(info.qualities || []);
-      clipsList.innerHTML = ''; clipsCount.textContent = '0 clips';
+      renderClips([], info.copyright);
       clipsProgress.classList.add('hidden');
       results.classList.remove('hidden');
       // scroll to results
@@ -304,7 +403,7 @@
       return;
     }
     showClipsError('');
-    clipsList.innerHTML = ''; clipsCount.textContent = '0 clips';
+    renderClips([], state.copyright);
     clipsProgress.classList.remove('hidden');
     clipsProgressFill.style.width = '1%'; clipsProgressPct.textContent = '1%'; clipsProgressMsg.textContent = 'Starting clip generation...';
     generateClipsBtn.disabled = true; generateClipsBtn.classList.add('loading');
@@ -331,14 +430,37 @@
     }
   }
 
-  // Tabs
-  document.querySelectorAll('.wtab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.wtab;
-      document.querySelectorAll('.wtab').forEach(b => b.classList.toggle('active', b === btn));
-      document.querySelectorAll('.wtab-panel').forEach(p => p.classList.toggle('active', p.id === `wtab-${tab}`));
+  const wtabs = Array.from(document.querySelectorAll('.wtab'));
+  const wtabPanels = Array.from(document.querySelectorAll('.wtab-panel'));
+  function activateTab(btn) {
+    const tab = btn.dataset.wtab;
+    wtabs.forEach((b) => {
+      const active = b === btn;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+      b.tabIndex = active ? 0 : -1;
+    });
+    wtabPanels.forEach((p) => {
+      const active = p.id === `wtab-${tab}`;
+      p.classList.toggle('active', active);
+      p.setAttribute('aria-hidden', active ? 'false' : 'true');
+    });
+  }
+  wtabs.forEach((btn, index) => {
+    btn.addEventListener('click', () => activateTab(btn));
+    btn.addEventListener('keydown', (event) => {
+      let next = index;
+      if (event.key === 'ArrowRight') next = (index + 1) % wtabs.length;
+      else if (event.key === 'ArrowLeft') next = (index - 1 + wtabs.length) % wtabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = wtabs.length - 1;
+      else return;
+      event.preventDefault();
+      activateTab(wtabs[next]);
+      wtabs[next].focus();
     });
   });
+  activateTab(wtabs.find((b) => b.classList.contains('active')) || wtabs[0]);
 
   // Theme toggle
   const THEME_KEY = 'vidgrab_theme';
