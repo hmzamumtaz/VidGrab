@@ -88,6 +88,15 @@ This repo includes `vercel.json` and `api/index.py` for serverless routing.
 - `.vercelignore` excludes `bin/`, `downloads/`, and `tmp/` from the serverless bundle to avoid Vercel’s function size limit (local macOS binaries are large and incompatible with Vercel’s Linux runtime).
 - On Vercel, filesystem writes are limited to `/tmp`; the app uses `/tmp/vidgrab` automatically.
 
+If YouTube shows a bot/sign-in check on Vercel, cookies cannot be read from `/var/task` or a browser. Set one of these Vercel environment variables:
+- `VIDGRAB_COOKIES_CONTENT`: the full `cookies.txt` content (Supabase/Vercel multiline values are supported). A pasted `name=value; name=value` browser cookie string also works and is converted automatically.
+- `VIDGRAB_COOKIES_B64`: base64-encoded `cookies.txt` content (useful for single-line secrets).
+- `VIDGRAB_COOKIES_FROM_BROWSER`: browser name only for local deployments; not useful on Vercel.
+- `VIDGRAB_YTDLP_PLAYER_CLIENTS`: optional pipe-separated client fallbacks, e.g. `web_embedded|android,ios|tv_embedded,mediaconnect`.
+- `VIDGRAB_JS_RUNTIMES`: optional yt-dlp JS runtime override, e.g. `node:/path/to/node` or `deno:/path/to/deno`.
+
+After adding/changing environment variables, redeploy and retry. Check `/api/health` for non-secret diagnostics (`cookies_configured`, `js_runtime_configured`, `vercel`).
+
 Full functionality is **not reliable on Vercel** because:
 - serverless execution time limits can interrupt `yt-dlp`/`ffmpeg` jobs
 - in-memory job state/progress is not persistent across instances/cold starts
