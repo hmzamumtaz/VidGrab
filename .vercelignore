@@ -1,0 +1,22 @@
+# Exclude large platform-specific binaries from Vercel serverless bundle
+# (Vercel runs on Linux; local macOS binaries are incompatible and exceed size limits)
+bin/
+bin/**
+downloads/
+downloads/**
+tmp/
+tmp/**
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.zip
+*.tar
+*.tar.gz
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.vscode/
+.idea/

@@ -84,13 +84,17 @@ VidGrab inspects available YouTube formats via `yt-dlp` metadata and builds sele
 
 ## Vercel deployment (limited)
 
-This repo includes `vercel.json` and `api/index.py` for serverless routing, but full functionality is **not reliable on Vercel** because:
-- serverless execution time limits can interrupt `yt-dlp`/`ffmpeg` jobs
-- filesystem is ephemeral (`/tmp`) and in-memory job state is not persistent across instances
-- bundled binaries in `bin/` are macOS builds and will not run on Vercel’s Linux runtime
-- `ffmpeg/ffprobe` may not be available in the runtime
+This repo includes `vercel.json` and `api/index.py` for serverless routing.
+- `.vercelignore` excludes `bin/`, `downloads/`, and `tmp/` from the serverless bundle to avoid Vercel’s function size limit (local macOS binaries are large and incompatible with Vercel’s Linux runtime).
+- On Vercel, filesystem writes are limited to `/tmp`; the app uses `/tmp/vidgrab` automatically.
 
-For full download/clip processing, run locally or on a persistent server/VM with Python + ffmpeg.
+Full functionality is **not reliable on Vercel** because:
+- serverless execution time limits can interrupt `yt-dlp`/`ffmpeg` jobs
+- in-memory job state/progress is not persistent across instances/cold starts
+- `ffmpeg`/`ffprobe` and a suitable JS runtime may not be available in the runtime
+- YouTube bot checks and long-running downloads/clips may exceed platform limits
+
+For full download/clip processing, run locally or on a persistent server/VM with Python + ffmpeg + yt-dlp.
 
 ## Legal
 
