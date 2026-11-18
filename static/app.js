@@ -205,7 +205,16 @@
         btn.disabled = true; btn.classList.add('loading');
         prog.classList.remove('hidden'); fill.style.width = '2%'; ptxt.textContent = 'Starting...';
         try {
-          const start = await api('/api/download/start', { method: 'POST', body: JSON.stringify({ url: state.url, format: q.format, label: q.label || 'video', title: state.info?.title || '' }) });
+          const payload = {
+            url: state.url,
+            format: q.format,
+            format_id: q.format_id || '',
+            height: q.height || null,
+            client_args: state.info?.client_args || [],
+            label: q.label || 'video',
+            title: state.info?.title || ''
+          };
+          const start = await api('/api/download/start', { method: 'POST', body: JSON.stringify(payload) });
           const job = await pollJob(start.job_id, (j) => {
             const p = Math.max(0, Math.min(100, Number(j.progress || 0)));
             fill.style.width = `${p}%`; ptxt.textContent = j.message || `${Math.round(p)}%`;

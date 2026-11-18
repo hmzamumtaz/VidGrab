@@ -66,7 +66,7 @@ Then open: [http://127.0.0.1:5050](http://127.0.0.1:5050)
 ## How it works
 
 ### Quality detection
-VidGrab inspects available YouTube formats via `yt-dlp` metadata and builds selectable quality options (with compatibility-focused MP4 format selection and size estimates when available).
+VidGrab inspects available YouTube formats via `yt-dlp` metadata and builds selectable quality options (with compatibility-focused MP4 format selection and size estimates when available). Downloads use exact format IDs from the same metadata fetch, with generic fallback selectors, to avoid “Requested format is not available” errors.
 
 ### Viral clip generation (heuristic, no AI)
 1. Downloads a source copy for analysis (with retries/fallback formats)

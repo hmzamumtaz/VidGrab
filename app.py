@@ -322,6 +322,17 @@ def friendly_ytdlp_error(msg):
         return hint
     return msg
 
+def friendly_format_error(msg):
+    msg = (msg or '').strip()
+    low = msg.lower()
+    if 'requested format is not available' in low or 'format is not available' in low or 'no video formats' in low:
+        hint = 'The selected quality is unavailable for this video. VidGrab retried exact format IDs and alternate formats; choose another quality or retry'
+        if msg:
+            return f"{hint}. Details: {msg}"[:900]
+        return hint
+    return msg
+
+
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
@@ -495,6 +506,7 @@ def get_video_info(url):
                     continue
                 continue
             if isinstance(info, dict):
+                info['_vidgrab_client_args'] = list(strat)
                 return info
             last_err = 'Unexpected video info response'
             continue
@@ -502,6 +514,164 @@ def get_video_info(url):
         # try next strategy/client on failures (esp. bot checks)
         continue
     raise RuntimeError(friendly_ytdlp_error(last_err) or 'Failed to fetch video info')
+
+
+def _as_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _best_format(candidates, scorer):
+    usable = [f for f in (candidates or []) if f.get('format_id')]
+    if not usable:
+        return None
+    return max(usable, key=scorer)
+
+
+def _video_score(f):
+    vcodec = str(f.get('vcodec') or '').lower()
+    ext = str(f.get('ext') or '').lower()
+    protocol = str(f.get('protocol') or '').lower()
+    note = str(f.get('format_note') or '').lower()
+    return (
+        1 if ext == 'mp4' else 0,
+        1 if vcodec.startswith(('avc', 'h264')) else 0,
+        1 if 'https' in protocol else 0,
+        0 if 'drc' in note else 1,
+        _as_float(f.get('fps')),
+        _as_float(f.get('tbr') or f.get('vbr')),
+    )
+
+
+def _audio_score(f):
+    acodec = str(f.get('acodec') or '').lower()
+    ext = str(f.get('ext') or '').lower()
+    protocol = str(f.get('protocol') or '').lower()
+    note = str(f.get('format_note') or '').lower()
+    return (
+        1 if ext in ('m4a', 'mp4') else 0,
+        1 if acodec.startswith('mp4a') else 0,
+        1 if 'https' in protocol else 0,
+        0 if 'drc' in note else 1,
+        _as_float(f.get('tbr') or f.get('abr')),
+    )
+
+
+def _progressive_score(f):
+    vcodec = str(f.get('vcodec') or '').lower()
+    acodec = str(f.get('acodec') or '').lower()
+    ext = str(f.get('ext') or '').lower()
+    protocol = str(f.get('protocol') or '').lower()
+    note = str(f.get('format_note') or '').lower()
+    return (
+        1 if ext == 'mp4' else 0,
+        1 if vcodec.startswith(('avc', 'h264')) else 0,
+        1 if acodec.startswith('mp4a') else 0,
+        1 if 'https' in protocol else 0,
+        0 if 'drc' in note else 1,
+        _as_float(f.get('tbr')),
+    )
+
+
+def exact_format_for_height(info, height):
+    formats = (info or {}).get('formats') or []
+    if not height:
+        return None
+    try:
+        height = int(height)
+    except (TypeError, ValueError):
+        return None
+    progressive = [f for f in formats if f.get('vcodec') not in (None, 'none') and f.get('acodec') not in (None, 'none') and int(f.get('height') or 0) == height]
+    best_progressive = _best_format(progressive, _progressive_score)
+    if best_progressive:
+        return str(best_progressive['format_id'])
+    video = [f for f in formats if f.get('vcodec') not in (None, 'none') and int(f.get('height') or 0) == height]
+    audio = [f for f in formats if f.get('acodec') not in (None, 'none') and f.get('vcodec') in (None, 'none')]
+    best_video = _best_format(video, _video_score)
+    best_audio = _best_format(audio, _audio_score)
+    if best_video and best_audio:
+        return f"{best_video['format_id']}+{best_audio['format_id']}"
+    if best_video:
+        return str(best_video['format_id'])
+    return None
+
+
+def display_height_for_formats(candidates, fallback):
+    for f in (candidates or []):
+        note = str(f.get('format_note') or '')
+        m = re.search(r'(\d{3,4})p', note, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+    dimensions = []
+    for f in (candidates or []):
+        try:
+            w = int(f.get('width') or 0)
+            h = int(f.get('height') or 0)
+        except (TypeError, ValueError):
+            continue
+        if w > 0 and h > 0:
+            dimensions.append(min(w, h))
+    return max(dimensions) if dimensions else fallback
+
+
+def exact_source_format(info, max_height=1080):
+    formats = (info or {}).get('formats') or []
+    heights = []
+    for f in formats:
+        try:
+            h = int(f.get('height') or 0)
+        except (TypeError, ValueError):
+            continue
+        if h > 0 and h <= max_height:
+            heights.append(h)
+    for h in sorted(set(heights), reverse=True):
+        exact = exact_format_for_height(info, h)
+        if exact:
+            return exact
+    return None
+
+
+def exact_format_candidates(info, height=None, fmt=None):
+    candidates = []
+    if fmt:
+        compact = re.sub(r'\s+', '', str(fmt))
+        if re.fullmatch(r'[A-Za-z0-9_.-]+(?:\+[A-Za-z0-9_.-]+)?(?:/[A-Za-z0-9_.-]+(?:\+[A-Za-z0-9_.-]+)?)*', compact):
+            candidates.append(compact)
+        if height is None:
+            m = re.search(r'height=(\d+)', str(fmt))
+            if m:
+                height = int(m.group(1))
+    exact = exact_format_for_height(info, height)
+    if exact and exact not in candidates:
+        candidates.append(exact)
+    return candidates
+
+
+def normalize_client_args(value):
+    if not isinstance(value, list) or not value or len(value) > 6:
+        return None
+    clean = []
+    for item in value:
+        if not isinstance(item, str) or len(item) > 300:
+            return None
+        clean.append(item)
+    if '--extractor-args' not in clean:
+        return None
+    for item in clean:
+        if item == '--extractor-args' or item.startswith('youtube:player_client='):
+            continue
+        return None
+    return clean
+
+
+def ordered_client_strategies(client_args=None):
+    preferred = normalize_client_args(client_args)
+    strategies = ytdlp_player_client_strategies()
+    if not preferred:
+        return strategies
+    return [preferred] + [s for s in strategies if s != preferred]
 
 
 def build_quality_options(info):
@@ -540,6 +710,7 @@ def build_quality_options(info):
                         best = sz
             return best
 
+        display_h = display_height_for_formats(v_candidates, h)
         v_sz = best_size(v_candidates)
         a_sz = best_size(a_candidates)
         total = None
@@ -576,11 +747,13 @@ def build_quality_options(info):
             note_parts.append(f'{max_fps}fps')
         options.append({
             'height': h,
-            'label': quality_label(h),
+            'display_height': display_h,
+            'label': quality_label(display_h),
             'ext': 'mp4',
             'size': total,
             'size_text': ("~" + fmt_bytes(total)) if fmt_bytes(total) else "Size unavailable",
             'format': fmt,
+            'format_id': exact_format_for_height(info, h),
             'note': ' • '.join(note_parts),
             'source': 'YouTube'
         })
@@ -898,6 +1071,7 @@ def api_info():
             'webpage_url': info.get('webpage_url') or url,
             'qualities': qualities,
             'quality_source': 'Fetched from available YouTube formats',
+            'client_args': info.get('_vidgrab_client_args') or [],
             'copyright': copyright_profile,
         })
     except Exception as e:
@@ -912,7 +1086,7 @@ def api_job(job_id):
     return jsonify(job)
 
 
-def _run_download_job(job_id, url, fmt, label, title_in):
+def _run_download_job(job_id, url, fmt, label, title_in, format_id=None, height=None, client_args=None):
     try:
         update_job(job_id, status='running', phase='starting', progress=1, message='Starting download...')
         title = safe_filename(title_in) if title_in else 'video'
@@ -922,17 +1096,23 @@ def _run_download_job(job_id, url, fmt, label, title_in):
         outtmpl = str(DOWNLOADS_DIR / f"{prefix}.%(ext)s")
         base = ytdlp_base_cmd()
         auth = ytdlp_auth_args()
+        job_info = None
+        try:
+            job_info = get_cached_video_info(url)
+        except Exception:
+            pass
+        preferred_args = normalize_client_args(client_args) or (job_info or {}).get('_vidgrab_client_args')
 
         # build format fallbacks
         fmt_candidates = []
-        for f in [fmt, 'bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b', 'b[ext=mp4]/b', 'bv*+ba/best', 'best']:
+        for f in [format_id, *exact_format_candidates(job_info, height, fmt), fmt, 'bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b', 'b[ext=mp4]/b', 'bv*+ba/best', 'best']:
             if f and f not in fmt_candidates:
                 fmt_candidates.append(f)
 
         last_lines = []
         produced = None
         last_ret = 1
-        for sidx, strat in enumerate(ytdlp_player_client_strategies()):
+        for sidx, strat in enumerate(ordered_client_strategies(preferred_args)):
             if produced:
                 break
             if sidx > 0:
@@ -1022,7 +1202,7 @@ def _run_download_job(job_id, url, fmt, label, title_in):
 
         if not produced or not produced.exists():
             tail = '\n'.join(last_lines[-20:])
-            raise RuntimeError(friendly_ytdlp_error(_extract_error(tail, '', 'Download completed but output file not found' if last_ret == 0 else None)) or 'Download failed')
+            raise RuntimeError(friendly_format_error(friendly_ytdlp_error(_extract_error(tail, '', 'Download completed but output file not found' if last_ret == 0 else None))) or 'Download failed')
 
         ok, info_or_err = validate_media(produced, require_video=True)
         if not ok:
@@ -1081,12 +1261,19 @@ def api_download_start():
     data = request.get_json(force=True, silent=True) or {}
     url = (data.get('url') or '').strip()
     fmt = (data.get('format') or '').strip() or 'bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b'
+    format_id = (data.get('format_id') or '').strip() or None
+    height = data.get('height')
+    try:
+        height = int(height) if height not in (None, '', 'null') else None
+    except (TypeError, ValueError):
+        height = None
+    client_args = data.get('client_args') or []
     label = (data.get('label') or 'video').strip()
     title = (data.get('title') or '').strip()
     if not url or not YOUTUBE_RE.search(url):
         return jsonify({'error': 'Please provide a valid YouTube URL.'}), 400
     job_id = create_job('download')
-    t = threading.Thread(target=_run_download_job, args=(job_id, url, fmt, label, title), daemon=True)
+    t = threading.Thread(target=_run_download_job, args=(job_id, url, fmt, label, title, format_id, height, client_args), daemon=True)
     t.start()
     return jsonify({'job_id': job_id})
 
@@ -1333,16 +1520,21 @@ def _run_clips_job(job_id, url, title_in):
         src_path = TMP_DIR / f"source-{job_id}.mp4"
         base = ytdlp_base_cmd()
         auth = ytdlp_auth_args()
+        job_info = None
+        try:
+            job_info = get_cached_video_info(url)
+        except Exception:
+            pass
+        preferred_args = (job_info or {}).get('_vidgrab_client_args')
+        source_format_id = exact_source_format(job_info)
 
-        fmt_candidates = [
-            'bv*[height<=1080][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b[height<=1080]/b',
-            'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/b',
-            'bv*+ba/b/best',
-            'best',
-        ]
+        fmt_candidates = []
+        for f in [source_format_id, 'bv*[height<=1080][vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b[height<=1080]/b', 'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/b', 'bv*+ba/b/best', 'best']:
+            if f and f not in fmt_candidates:
+                fmt_candidates.append(f)
         last_lines = []
         got = False
-        for sidx, strat in enumerate(ytdlp_player_client_strategies()):
+        for sidx, strat in enumerate(ordered_client_strategies(preferred_args)):
             if got:
                 break
             if sidx > 0:
@@ -1410,7 +1602,7 @@ def _run_clips_job(job_id, url, title_in):
 
         if not got or not src_path or not src_path.exists():
             tail = '\n'.join(last_lines[-15:])
-            raise RuntimeError(friendly_ytdlp_error(_extract_error(tail, '', 'Failed to download source video for analysis')) or 'Failed to download source video for analysis')
+            raise RuntimeError(friendly_format_error(friendly_ytdlp_error(_extract_error(tail, '', 'Failed to download source video for analysis'))) or 'Failed to download source video for analysis')
 
         ok, info_or_err = validate_media(src_path, require_video=True)
         if not ok:
