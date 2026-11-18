@@ -144,6 +144,10 @@
     return node;
   }
 
+  function setText(node, value) {
+    if (node) node.textContent = value;
+  }
+
   function shortResolution(q) {
     const label = String(q?.label || '');
     if (/4k|2160/i.test(label)) return '4K';
@@ -194,38 +198,50 @@
     state.copyright = cp || null;
     const allowed = !!(cp && cp.allow_clip_downloads);
     state.clipsAllowed = allowed;
-    copyrightBox.classList.remove('safe', 'danger', 'neutral');
+    if (copyrightBox) copyrightBox.classList.remove('safe', 'danger', 'neutral');
     if (clipsNoteDot) clipsNoteDot.classList.remove('ready');
     if (!cp) {
-      copyrightBox.classList.add('neutral');
-      copyrightTitle.textContent = 'Copyright safety check';
-      copyrightDetail.textContent = 'Automated metadata pre-check (no external APIs). Not a legal guarantee.';
-      generateClipsBtn.disabled = true;
-      clipsGate.classList.add('hidden');
-      clipsNote.textContent = 'Load a video to check clip eligibility.';
+      if (copyrightBox) copyrightBox.classList.add('neutral');
+      setText(copyrightTitle, 'Copyright safety check');
+      setText(copyrightDetail, 'Automated metadata pre-check (no external APIs). Not a legal guarantee.');
+      if (generateClipsBtn) generateClipsBtn.disabled = true;
+      if (clipsGate) clipsGate.classList.add('hidden');
+      setText(clipsNote, 'Load a video to check clip eligibility.');
       return;
     }
     const reasons = (cp.reasons || []).filter(Boolean);
     const reasonText = reasons.length ? reasons.join(' • ') : 'Automated metadata pre-check completed.';
     const note = cp.note ? ` ${cp.note}` : '';
     if (allowed) {
-      copyrightBox.classList.add('safe');
-      copyrightTitle.textContent = 'Automated pre-check: clip downloads allowed';
-      copyrightDetail.textContent = `${reasonText}.${note}`;
-      generateClipsBtn.disabled = false;
-      clipsGate.classList.add('hidden');
-      clipsNote.textContent = 'Ready to scan locally. Clip downloads stay subject to the automated safety check.';
+      if (copyrightBox) copyrightBox.classList.add('safe');
+      setText(copyrightTitle, 'Automated pre-check: clip downloads allowed');
+      setText(copyrightDetail, `${reasonText}.${note}`);
+      if (generateClipsBtn) generateClipsBtn.disabled = false;
+      if (clipsGate) {
+        setText(clipsGateTitle, '');
+        setText(clipsGateDetail, '');
+        setText(clipsGateFooter, '');
+        clipsGate.classList.add('hidden');
+      }
+      setText(clipsNote, 'Ready to scan locally. Clip downloads stay subject to the automated safety check.');
       if (clipsNoteDot) clipsNoteDot.classList.add('ready');
     } else {
-      copyrightBox.classList.add('danger');
-      copyrightTitle.textContent = 'Potential copyright detected — clip downloads blocked';
-      copyrightDetail.textContent = `${reasonText}.${note}`;
-      generateClipsBtn.disabled = true;
-      clipsGateTitle.textContent = 'Clip downloads are blocked for this video';
-      clipsGateDetail.textContent = `Automated pre-check found: ${reasonText}.${note}`;
-      clipsGateFooter.textContent = 'Full video download is still available if you have rights to use it.';
-      clipsGate.classList.remove('hidden');
-      clipsNote.textContent = 'Clip downloads require passing the automated copyright safety pre-check.';
+      if (copyrightBox) copyrightBox.classList.add('danger');
+      setText(copyrightTitle, 'Potential copyright detected — clip downloads blocked');
+      setText(copyrightDetail, `${reasonText}.${note}`);
+      if (generateClipsBtn) generateClipsBtn.disabled = true;
+      const gateTitle = 'Clip downloads are blocked for this video';
+      const gateDetail = `Automated pre-check found: ${reasonText}.${note}`;
+      const gateFooter = 'Full video download is still available if you have rights to use it.';
+      if (clipsGateTitle) {
+        setText(clipsGateTitle, gateTitle);
+        setText(clipsGateDetail, gateDetail);
+        setText(clipsGateFooter, gateFooter);
+      } else {
+        setText(clipsGate, gateTitle);
+      }
+      if (clipsGate) clipsGate.classList.remove('hidden');
+      setText(clipsNote, 'Clip downloads require passing the automated copyright safety pre-check.');
     }
   }
 

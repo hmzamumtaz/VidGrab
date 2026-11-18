@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>YouTube Video Downloader & Viral Clips — VidGrab</title>
   <meta name="description" content="Download YouTube videos in every available quality and generate multiple viral clips with automated copyright safety checks.">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ static_url('style.css') }}">
 </head>
 <body>
   <section class="ytx-hero alignfull" data-theme="light" id="hero">
@@ -193,6 +193,6 @@
     </div>
   </footer>
 
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ static_url('app.js') }}"></script>
 </body>
 </html>

@@ -13,9 +13,10 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
-from flask import Flask, jsonify, request, render_template, send_file, abort
+from flask import Flask, jsonify, request, render_template, send_file, abort, url_for
 
 BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 BIN_DIR = BASE_DIR / "bin"
 IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV") or os.environ.get("NOW_REGION"))
 
@@ -229,6 +230,19 @@ FFPROBE = resolve_ffprobe()
 YTDLP = resolve_ytdlp()
 
 app = Flask(__name__)
+
+
+@app.context_processor
+def inject_static_url():
+    def static_url(filename):
+        path = STATIC_DIR / filename
+        try:
+            version = int(path.stat().st_mtime)
+        except OSError:
+            version = "1"
+        return url_for("static", filename=filename, v=version)
+    return {"static_url": static_url}
+
 
 YOUTUBE_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+', re.IGNORECASE)
 COMMON_YTDLP_ARGS = ['--ignore-config', '--no-cache-dir', '--no-progress']
