@@ -3,189 +3,165 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VidGrab — Premium YouTube Downloader & Viral Clip Studio</title>
-  <meta name="description" content="Download YouTube videos in every available quality and generate multiple high-potential viral clips with built-in copyright safety checks.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>YouTube Video Downloader & Viral Clips — VidGrab</title>
+  <meta name="description" content="Download YouTube videos in every available quality and generate multiple viral clips with automated copyright safety checks.">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="bg-orb bg-orb-a"></div>
-  <div class="bg-orb bg-orb-b"></div>
-  <div class="bg-grid"></div>
-
-  <header class="topbar">
-    <div class="container topbar-inner">
-      <a class="brand" href="/">
-        <span class="brand-mark">▶</span>
-        <span class="brand-text">VidGrab</span>
-      </a>
-      <nav class="topnav" aria-label="Primary">
-        <a href="#workspace">Downloader</a>
-        <a href="#features">Features</a>
-        <a href="#safety">Safety</a>
-      </nav>
-    </div>
-  </header>
-
-  <main>
-    <section class="hero container">
-      <div class="hero-copy">
-        <div class="eyebrow">Premium YouTube toolkit • No AI • No paid APIs</div>
-        <h1>Download any quality.<br><span class="gradient-text">Create viral-ready clips.</span></h1>
-        <p class="hero-sub">Paste a YouTube link, fetch every available resolution from 144p to 4K, download full videos, or auto-generate multiple high-potential short clips for long videos with automated copyright safety gating.</p>
-        <div class="hero-points">
-          <span class="pill">All YouTube qualities</span>
-          <span class="pill">Multi-clip generation</span>
-          <span class="pill">Faster processing</span>
-          <span class="pill">Copyright pre-check</span>
+  <section class="ytx-hero alignfull" data-theme="light" id="hero">
+    <div class="ytx-container">
+      <header class="ytx-header">
+        <div class="ytx-titles">
+          <span class="ytx-eyebrow">
+            <span class="ytx-eyebrow-dot" aria-hidden="true"></span>
+            VidGrab YouTube Downloader
+          </span>
+          <h1 class="ytx-title">YouTube Video Downloader</h1>
+          <p class="ytx-subtitle">Paste a YouTube video or Shorts link, fetch every available quality, and save the full video or generate multiple viral clips in seconds.</p>
         </div>
-      </div>
-    </section>
-
-    <section class="workspace container" id="workspace">
-      <div class="card card-main">
-        <div class="card-head">
-          <div>
-            <h2>Video Workspace</h2>
-            <p class="muted">Load a video to see metadata, every detected quality, and clip options.</p>
-          </div>
-          <div class="status-badges">
-            <span class="badge badge-soft">Local processing</span>
-            <span class="badge badge-soft">yt-dlp + ffmpeg</span>
-          </div>
-        </div>
-
-        <form id="load-form" class="url-form" autocomplete="off">
-          <label for="url-input" class="sr-only">YouTube URL</label>
-          <div class="url-input-wrap">
-            <span class="url-icon">🔗</span>
-            <input id="url-input" type="url" placeholder="Paste YouTube URL (youtube.com or youtu.be)" required>
-          </div>
-          <button id="load-btn" type="submit" class="btn btn-primary btn-lg">
-            <span class="btn-label">Load Video</span>
-            <span class="btn-spinner" aria-hidden="true"></span>
+        <div class="ytx-header-actions">
+          <button class="ytx-theme" id="ytx-theme-toggle" type="button" aria-label="Switch to dark mode" title="Dark mode">
+            <svg class="ytx-ic-moon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M20.7 14.3A8.5 8.5 0 0 1 9.7 3.3a.75.75 0 0 0-.95-.95A10 10 0 1 0 21.65 15.25a.75.75 0 0 0-.95-.95Z"/></svg>
+            <svg class="ytx-ic-sun" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Zm7 8h1a1 1 0 1 1 0 2h-1a1 1 0 1 1 0-2ZM4 11H3a1 1 0 1 0 0 2h1a1 1 0 1 0 0-2Zm1.64-6.36a1 1 0 0 1 1.41 0l.7.7a1 1 0 0 1-1.42 1.42l-.69-.7a1 1 0 0 1 0-1.41ZM16.24 17.66a1 1 0 0 1 1.41 0l.69.7a1 1 0 0 1-1.41 1.41l-.7-.69a1 1 0 0 1 0-1.42ZM17.66 5.64a1 1 0 0 1 0 1.41l-.7.7a1 1 0 0 1-1.41-1.42l.69-.69a1 1 0 0 1 1.42 0ZM7.76 17.66a1 1 0 0 1 0 1.41l-.69.7a1 1 0 0 1-1.42-1.41l.7-.7a1 1 0 0 1 1.41 0ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"/></svg>
           </button>
-        </form>
-
-        <div id="error" class="alert alert-error hidden" role="alert"></div>
-        <div id="notice" class="alert alert-info hidden" role="status"></div>
-
-        <div id="skeleton" class="skeleton hidden" aria-hidden="true">
-          <div class="skel skel-thumb"></div>
-          <div class="skel-lines">
-            <div class="skel skel-line w-80"></div>
-            <div class="skel skel-line w-50"></div>
-            <div class="skel skel-line w-60"></div>
-          </div>
         </div>
+      </header>
 
-        <div id="video-panel" class="video-panel hidden">
-          <div class="video-summary">
-            <div class="thumb-wrap">
-              <img id="thumb" alt="Video thumbnail">
-              <span id="duration-badge" class="duration-badge">--:--</span>
+      <form id="video-url-form" class="ytx-form" autocomplete="off" novalidate role="search" aria-label="YouTube link">
+        <div class="ytx-input-shell">
+          <div class="ytx-input-wrap">
+            <span class="ytx-input-leading" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="3"/>
+                <line x1="12" y1="9" x2="12" y2="14.5"/>
+                <polyline points="9.5 12 12 14.5 14.5 12"/>
+              </svg>
+            </span>
+            <input type="url" id="video-url" name="video_url" class="ytx-input" placeholder="Paste a YouTube video or Shorts link" inputmode="url" autocomplete="off" spellcheck="false" aria-describedby="ytx-input-hint" />
+            <div class="ytx-input-tools">
+              <button type="button" id="ytx-clear-btn" class="ytx-clear-btn ytx-tool" aria-label="Clear" hidden>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.3 5.71 12 12.01 5.7 5.71 4.29 7.12l6.3 6.3-6.3 6.3 1.41 1.41 6.3-6.3 6.3 6.3 1.41-1.41-6.3-6.3 6.3-6.3z"/></svg>
+              </button>
+              <button type="button" id="ytx-paste-btn" class="ytx-paste-btn ytx-tool" aria-label="Paste from clipboard">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M19 8h-3V5a3 3 0 0 0-3-3h-2a3 3 0 0 0-3 3v3H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2Zm-8-3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3h-4V5Zm8 15H5V10h14v10Z"/></svg>
+                <span class="ytx-tool-label">Paste</span>
+              </button>
             </div>
-            <div class="video-meta">
-              <h3 id="video-title">Video title</h3>
-              <p id="video-channel" class="muted">Channel</p>
-              <div class="meta-row">
-                <span id="quality-source" class="meta-chip">Quality source</span>
-                <span id="video-link-wrap" class="meta-chip meta-chip-link hidden"><a id="video-link" href="#" target="_blank" rel="noopener">Open on YouTube</a></span>
-              </div>
-              <div id="copyright-banner" class="copyright-banner neutral">
-                <div class="copyright-icon">🛡️</div>
-                <div>
-                  <div id="copyright-title" class="copyright-title">Copyright safety check</div>
-                  <div id="copyright-detail" class="copyright-detail">Load a video to run automated pre-checks.</div>
+          </div>
+          <button type="submit" id="submit-url" class="ytx-submit-btn" data-state="idle">
+            <span class="ytx-btn-inner">
+              <span class="ytx-btn-text">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 16a1 1 0 0 1-.7-.29l-4-4a1 1 0 1 1 1.4-1.42L11 12.6V4a1 1 0 1 1 2 0v8.59l2.29-2.3a1 1 0 1 1 1.42 1.42l-4 4A1 1 0 0 1 12 16Zm8 4H4a1 1 0 1 1 0-2h16a1 1 0 1 1 0 2Z"/></svg>
+                <span>Download</span>
+              </span>
+              <span class="ytx-btn-loading" aria-hidden="true">
+                <span class="ytx-spinner"></span>
+                <span>Fetching…</span>
+              </span>
+            </span>
+          </button>
+        </div>
+        <p id="ytx-input-hint" class="ytx-hint">Tip: open the YouTube video, tap Share → Copy link, then paste it above.</p>
+        <p id="ytx-wait" class="ytx-hint" role="status" aria-live="polite" hidden></p>
+        <div id="error-message" class="ytx-error" role="status" aria-live="polite" hidden></div>
+      </form>
+
+      <ul class="ytx-feature-row" aria-hidden="true">
+        <li><span aria-hidden="true">⚡</span> Lightning-fast YouTube fetch</li>
+        <li><span aria-hidden="true">🎬</span> All qualities up to 4K</li>
+        <li><span aria-hidden="true">✂️</span> Multiple viral clips</li>
+        <li><span aria-hidden="true">🛡️</span> Copyright safety pre-check</li>
+      </ul>
+
+      <ol class="ytx-steps" aria-label="How to download a YouTube video">
+        <li><span class="ytx-step-num">1</span>Copy the YouTube video or Shorts link.</li>
+        <li><span class="ytx-step-num">2</span>Paste it into the box above and tap Download.</li>
+        <li><span class="ytx-step-num">3</span>Pick a quality or generate viral clips and save.</li>
+      </ol>
+    </div>
+  </section>
+
+  <main class="app-main" id="app-main">
+    <div class="app-container">
+      <section id="results" class="results hidden" aria-live="polite">
+        <div class="ytx-pv-card video-card">
+          <div class="video-card-grid">
+            <div class="video-card-media">
+              <div class="ytx-pv-thumb">
+                <div class="ytx-pv-thumb-slot">
+                  <img id="v-thumb" alt="" loading="lazy">
+                  <span id="v-duration" class="ytx-pv-duration">--:--</span>
                 </div>
               </div>
             </div>
+            <div class="video-card-body">
+              <div class="ytx-pv-eyebrow"><span class="ytx-pv-eyebrow-dot"></span> Video Ready</div>
+              <h2 id="v-title" class="ytx-pv-title">Video title</h2>
+              <p class="ytx-pv-meta"><span class="ytx-pv-meta-icon">👤</span> <strong id="v-uploader">Channel</strong></p>
+              <p class="ytx-pv-meta"><span class="ytx-pv-meta-icon">🎞️</span> <span id="v-quality-source">All available YouTube qualities detected</span></p>
+              <div id="copyright-box" class="copyright-box neutral">
+                <div class="copyright-box-title" id="copyright-title">Copyright safety check</div>
+                <div class="copyright-box-detail" id="copyright-detail">Automated metadata pre-check (no external APIs). Not a legal guarantee.</div>
+              </div>
+              <div class="action-row">
+                <a id="v-open" class="ytx-btn ytx-btn--ghost" href="#" target="_blank" rel="noopener">Open on YouTube</a>
+              </div>
+            </div>
           </div>
+        </div>
 
-          <div class="tabs" role="tablist" aria-label="Modes">
-            <button class="tab active" data-tab="download" role="tab" aria-selected="true">Full Video Download</button>
-            <button class="tab" data-tab="clips" role="tab" aria-selected="false">Viral Clips Studio</button>
-          </div>
+        <div class="workspace-tabs">
+          <button class="wtab active" data-wtab="qualities" type="button">Full Video</button>
+          <button class="wtab" data-wtab="clips" type="button">Viral Clips</button>
+        </div>
 
-          <section id="tab-download" class="tab-panel active" role="tabpanel">
-            <div class="panel-head">
-              <h4>Available YouTube Qualities</h4>
-              <p class="muted small">Detected directly from available YouTube formats before download.</p>
+        <div id="wtab-qualities" class="wtab-panel active">
+          <section class="ytx-pv-section">
+            <div class="ytx-pv-section-head">
+              <h2><span class="ytx-pv-section-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg></span> Available Qualities</h2>
+              <span class="ytx-pv-section-count" id="quality-count">0 options</span>
             </div>
-            <div id="quality-grid" class="quality-grid"></div>
-          </section>
-
-          <section id="tab-clips" class="tab-panel" role="tabpanel">
-            <div class="panel-head row-head">
-              <div>
-                <h4>Viral Clips Generator</h4>
-                <p class="muted small">Analyzes the full video locally to pick multiple high-potential moments (audio energy + scene changes). No AI, no external APIs.</p>
-              </div>
-              <button id="generate-clips-btn" class="btn btn-primary">
-                <span class="btn-label">Generate Viral Clips</span>
-                <span class="btn-spinner" aria-hidden="true"></span>
-              </button>
-            </div>
-
-            <div id="clips-blocked" class="alert alert-warning hidden"></div>
-
-            <div id="clips-progress" class="progress-card hidden">
-              <div class="progress-top">
-                <span id="clips-progress-text">Preparing...</span>
-                <span id="clips-progress-pct">0%</span>
-              </div>
-              <div class="progress-bar"><div id="clips-progress-fill" class="progress-fill" style="width:0%"></div></div>
-            </div>
-
-            <div id="clips-empty" class="empty-state hidden">
-              <div class="empty-icon">🎬</div>
-              <div>
-                <strong>No clips yet</strong>
-                <p class="muted small">Load a copyright-cleared video and generate multiple viral-ready clips.</p>
-              </div>
-            </div>
-
-            <div id="clips-list" class="clips-list"></div>
+            <p class="ytx-pv-section-help">All detected YouTube formats are listed below (e.g. 720p, 1080p, 1440p, 4K when available). Sizes are estimates.</p>
+            <div id="quality-list" class="ytx-format-grid"></div>
           </section>
         </div>
-      </div>
-    </section>
 
-    <section class="features container" id="features">
-      <div class="section-head">
-        <h2>Built for speed, quality, and safety</h2>
-        <p class="muted">A premium local workflow inspired by modern downloader tools.</p>
-      </div>
-      <div class="feature-grid">
-        <article class="feature-card">
-          <div class="feature-icon">⚡</div>
-          <h3>Faster Processing</h3>
-          <p>Concurrent fragment downloads, tuned analysis, and streamlined rendering for quicker results.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-icon">🧩</div>
-          <h3>Multiple Viral Clips</h3>
-          <p>Automatically segments long videos into several diverse high-potential moments instead of just one.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-icon">🎞️</div>
-          <h3>Every Available Quality</h3>
-          <p>Surfaces all detected YouTube resolutions/formats so you can choose 1080p, 1440p, 4K and more before download.</p>
-        </article>
-        <article class="feature-card" id="safety">
-          <div class="feature-icon">🛡️</div>
-          <h3>Copyright Safety Gate</h3>
-          <p>Automated pre-download checks block clip downloads when potential copyright signals are detected. No guarantees, maximum caution.</p>
-        </article>
-      </div>
-    </section>
+        <div id="wtab-clips" class="wtab-panel">
+          <section class="ytx-pv-section">
+            <div class="ytx-pv-section-head">
+              <h2><span class="ytx-pv-section-icon ytx-pv-section-icon--image"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h10M4 17h16"/></svg></span> Viral Clips Studio</h2>
+              <span class="ytx-pv-section-count" id="clips-count">0 clips</span>
+            </div>
+            <p class="ytx-pv-section-help">Analyzes the full video locally (audio energy + scene changes, no AI) to generate multiple high-potential clips for long videos. Faster processing enabled.</p>
 
-    <footer class="footer container">
-      <p>VidGrab runs locally on your machine. First load may take 1–2 minutes while the downloader initializes. Use only content you have rights to download and share.</p>
-    </footer>
+            <div id="clips-gate" class="clips-gate hidden"></div>
+
+            <div class="clips-toolbar">
+              <button id="generate-clips-btn" class="ytx-btn ytx-btn--primary" type="button">
+                <span class="ytx-btn-text">Generate Viral Clips</span>
+                <span class="ytx-btn-loading" aria-hidden="true"><span class="ytx-spinner"></span></span>
+              </button>
+              <span id="clips-note" class="clips-note">Clip downloads require passing the automated copyright safety pre-check.</span>
+            </div>
+
+            <div id="clips-progress" class="clips-progress hidden">
+              <div class="clips-progress-row"><span id="clips-progress-msg">Preparing…</span><span id="clips-progress-pct">0%</span></div>
+              <div class="clips-progress-bar"><div id="clips-progress-fill"></div></div>
+            </div>
+
+            <div id="clips-error" class="ytx-error hidden" role="alert"></div>
+            <div id="clips-list" class="clips-grid"></div>
+          </section>
+        </div>
+      </section>
+    </div>
   </main>
+
+  <footer class="site-footer-note">
+    <div class="app-container">
+      <p>VidGrab runs locally with yt-dlp and ffmpeg (no AI, no paid APIs). Automated copyright checks are best-effort metadata heuristics and not a legal guarantee. Use only content you have rights to download and share.</p>
+    </div>
+  </footer>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
