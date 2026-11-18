@@ -7,6 +7,7 @@ import time
 import uuid
 import math
 import shutil
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,10 +15,18 @@ from flask import Flask, jsonify, request, render_template, send_file, abort
 
 BASE_DIR = Path(__file__).resolve().parent
 BIN_DIR = BASE_DIR / "bin"
-DOWNLOADS_DIR = BASE_DIR / "downloads"
-TMP_DIR = BASE_DIR / "tmp"
+IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV") or os.environ.get("NOW_REGION"))
+
+# Use writable storage on serverless/read-only environments
+DATA_DIR = Path(os.environ.get("VIDGRAB_DATA_DIR", "/tmp/vidgrab" if IS_VERCEL or not os.access(str(BASE_DIR), os.W_OK) else str(BASE_DIR)))
+DOWNLOADS_DIR = DATA_DIR / "downloads"
+TMP_DIR = DATA_DIR / "tmp"
 for d in (DOWNLOADS_DIR, TMP_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # last resort fallback
+        pass
 
 
 def _which(name):
@@ -53,16 +62,22 @@ def resolve_ffprobe():
 
 
 def resolve_ytdlp():
-    candidates = [
-        str(BIN_DIR / "yt-dlp_macos"),
-        str(BIN_DIR / "yt-dlp"),
-        _which("yt-dlp"),
-        os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp"),
-    ]
+    candidates = []
+    # Prefer system/pip yt-dlp on Linux/serverless; prefer bundled mac binary on macOS
+    if sys.platform == "darwin":
+        candidates += [str(BIN_DIR / "yt-dlp_macos"), str(BIN_DIR / "yt-dlp")]
+    candidates += [_which("yt-dlp")]
+    if sys.platform != "darwin":
+        candidates += [str(BIN_DIR / "yt-dlp_macos"), str(BIN_DIR / "yt-dlp")]
+    candidates += [os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp")]
     for c in candidates:
         if _is_executable(c):
             _dequarantine(c)
             return c
+    # fallback to python module invocation path marker handled elsewhere? return best guess
+    found = _which("yt-dlp")
+    if found:
+        return found
     return str(BIN_DIR / "yt-dlp_macos")
 
 
@@ -210,14 +225,25 @@ def _extract_error(err, out, extra=None):
 
 
 def ytdlp_base_cmd():
-    if not YTDLP or not os.path.exists(YTDLP):
-        raise RuntimeError(f"yt-dlp executable not found at {BIN_DIR / 'yt-dlp_macos'}.")
-    try:
-        if not os.access(YTDLP, os.X_OK):
-            os.chmod(YTDLP, 0o755)
-    except Exception:
-        pass
-    return [YTDLP] + COMMON_YTDLP_ARGS
+    # Prefer executable binary/script
+    if YTDLP and os.path.exists(YTDLP):
+        try:
+            if not os.access(YTDLP, os.X_OK):
+                os.chmod(YTDLP, 0o755)
+        except Exception:
+            pass
+        # if it's our mac binary but we're not on mac, try system/module
+        if sys.platform != "darwin" and os.path.basename(YTDLP) == "yt-dlp_macos":
+            alt = _which("yt-dlp")
+            if alt:
+                return [alt] + COMMON_YTDLP_ARGS
+            return [sys.executable, "-m", "yt_dlp"] + COMMON_YTDLP_ARGS
+        return [YTDLP] + COMMON_YTDLP_ARGS
+    alt = _which("yt-dlp")
+    if alt:
+        return [alt] + COMMON_YTDLP_ARGS
+    # fallback to module
+    return [sys.executable, "-m", "yt_dlp"] + COMMON_YTDLP_ARGS
 
 
 def get_video_info(url):
