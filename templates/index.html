@@ -1,140 +1,192 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>VidGrab — YouTube Downloader & Viral Clips</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VidGrab — Premium YouTube Downloader & Viral Clip Studio</title>
+  <meta name="description" content="Download YouTube videos in every available quality and generate multiple high-potential viral clips with built-in copyright safety checks.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="page-bg">
-    <div class="orb orb-a"></div>
-    <div class="orb orb-b"></div>
-    <div class="grid-overlay"></div>
-  </div>
+  <div class="bg-orb bg-orb-a"></div>
+  <div class="bg-orb bg-orb-b"></div>
+  <div class="bg-grid"></div>
 
-  <main class="shell">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5-11-6.5z" fill="currentColor"/></svg>
-        </div>
-        <div>
-          <div class="brand-name">VidGrab</div>
-          <div class="brand-tag">Local downloader & clip studio</div>
-        </div>
-      </div>
-      <div class="topbar-note">No accounts • No APIs • Runs on your Mac</div>
-    </header>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark">▶</span>
+        <span class="brand-text">VidGrab</span>
+      </a>
+      <nav class="topnav" aria-label="Primary">
+        <a href="#workspace">Downloader</a>
+        <a href="#features">Features</a>
+        <a href="#safety">Safety</a>
+      </nav>
+    </div>
+  </header>
 
-    <section class="hero">
-      <h1>Download videos. Generate <span class="grad">viral clips</span>.</h1>
-      <p>Paste any YouTube link to fetch available qualities or auto-create highlight clips with on-device audio & scene analysis.</p>
-    </section>
-
-    <section class="panel url-panel">
-      <form id="url-form" class="url-form" autocomplete="off">
-        <div class="input-wrap">
-          <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.59 13.41a1 1 0 0 0 1.41 1.41l4.24-4.24a3 3 0 1 0-4.24-4.24L10.3 8.05a1 1 0 1 0 1.41 1.41l1.7-1.7a1 1 0 1 1 1.42 1.41l-4.24 4.24z" fill="currentColor"/><path d="M13.41 10.59a1 1 0 0 0-1.41-1.41l-4.24 4.24a3 3 0 1 0 4.24 4.24l1.71-1.71a1 1 0 1 0-1.41-1.41l-1.71 1.71a1 1 0 1 1-1.42-1.42l4.24-4.24z" fill="currentColor"/></svg>
-          <input id="url-input" type="url" placeholder="Paste YouTube URL here (youtube.com or youtu.be)" required />
+  <main>
+    <section class="hero container">
+      <div class="hero-copy">
+        <div class="eyebrow">Premium YouTube toolkit • No AI • No paid APIs</div>
+        <h1>Download any quality.<br><span class="gradient-text">Create viral-ready clips.</span></h1>
+        <p class="hero-sub">Paste a YouTube link, fetch every available resolution from 144p to 4K, download full videos, or auto-generate multiple high-potential short clips for long videos with automated copyright safety gating.</p>
+        <div class="hero-points">
+          <span class="pill">All YouTube qualities</span>
+          <span class="pill">Multi-clip generation</span>
+          <span class="pill">Faster processing</span>
+          <span class="pill">Copyright pre-check</span>
         </div>
-        <button id="load-btn" type="submit" class="btn btn-primary">
-          <span class="btn-label">Load Video</span>
-          <span class="btn-spinner" aria-hidden="true"></span>
-        </button>
-      </form>
-      <div class="hint-row">
-        <span class="hint">First load may take 1–2 minutes while the downloader initializes.</span>
-      </div>
-      <div id="form-error" class="alert alert-error hidden"></div>
-    </section>
-
-    <section id="video-section" class="panel video-panel hidden">
-      <div class="video-head">
-        <div class="thumb-wrap">
-          <img id="video-thumb" class="thumb" alt="Video thumbnail" />
-          <div class="thumb-fallback hidden" id="thumb-fallback">
-            <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5-11-6.5z" fill="currentColor"/></svg>
-          </div>
-        </div>
-        <div class="video-info">
-          <div class="eyebrow">Loaded video</div>
-          <h2 id="video-title" class="video-title"></h2>
-          <div class="meta-row">
-            <span id="video-uploader" class="meta-pill"></span>
-            <span id="video-duration" class="meta-pill"></span>
-          </div>
-          <a id="video-link" href="#" target="_blank" rel="noopener" class="link-subtle">Open on YouTube ↗</a>
-        </div>
-      </div>
-
-      <div class="mode-switch" role="tablist" aria-label="Mode">
-        <button id="tab-full" class="mode-tab active" type="button" data-mode="full">
-          <span class="mode-icon">⬇</span>
-          <span>
-            <strong>Full Video</strong>
-            <small>Choose quality & download</small>
-          </span>
-        </button>
-        <button id="tab-clips" class="mode-tab" type="button" data-mode="clips">
-          <span class="mode-icon">✦</span>
-          <span>
-            <strong>Viral Clips</strong>
-            <small>Auto-generate highlights</small>
-          </span>
-        </button>
       </div>
     </section>
 
-    <section id="full-section" class="panel content-panel hidden">
-      <div class="panel-head">
-        <div>
-          <h3>Available Qualities</h3>
-          <p class="muted">Fetched from YouTube. Sizes are estimates when exact values aren’t provided.</p>
-        </div>
-      </div>
-      <div id="quality-list" class="quality-grid"></div>
-    </section>
-
-    <section id="clips-section" class="panel content-panel hidden">
-      <div class="panel-head clips-head">
-        <div>
-          <h3>Viral Clips</h3>
-          <p class="muted">Analyzes audio energy & scene changes locally to pick highlight moments (no AI).</p>
-        </div>
-        <button id="generate-clips-btn" class="btn btn-primary" type="button">
-          <span class="btn-label">Generate Clips</span>
-          <span class="btn-spinner" aria-hidden="true"></span>
-        </button>
-      </div>
-
-      <div id="clips-idle" class="empty-state">
-        <div class="empty-icon">✂</div>
-        <div class="empty-title">Ready to find the best moments</div>
-        <div class="empty-sub">Click <strong>Generate Clips</strong> to download a source copy, analyze it, and render share-ready highlight clips.</div>
-      </div>
-
-      <div id="clips-progress" class="progress-card hidden">
-        <div class="progress-top">
+    <section class="workspace container" id="workspace">
+      <div class="card card-main">
+        <div class="card-head">
           <div>
-            <div class="progress-title" id="clips-progress-title">Preparing...</div>
-            <div class="progress-sub" id="clips-progress-sub">This can take a few minutes depending on video length.</div>
+            <h2>Video Workspace</h2>
+            <p class="muted">Load a video to see metadata, every detected quality, and clip options.</p>
           </div>
-          <div class="progress-pct" id="clips-progress-pct">0%</div>
+          <div class="status-badges">
+            <span class="badge badge-soft">Local processing</span>
+            <span class="badge badge-soft">yt-dlp + ffmpeg</span>
+          </div>
         </div>
-        <div class="bar"><div class="bar-fill" id="clips-progress-bar" style="width:0%"></div></div>
-      </div>
 
-      <div id="clips-error" class="alert alert-error hidden"></div>
-      <div id="clips-list" class="clips-grid"></div>
+        <form id="load-form" class="url-form" autocomplete="off">
+          <label for="url-input" class="sr-only">YouTube URL</label>
+          <div class="url-input-wrap">
+            <span class="url-icon">🔗</span>
+            <input id="url-input" type="url" placeholder="Paste YouTube URL (youtube.com or youtu.be)" required>
+          </div>
+          <button id="load-btn" type="submit" class="btn btn-primary btn-lg">
+            <span class="btn-label">Load Video</span>
+            <span class="btn-spinner" aria-hidden="true"></span>
+          </button>
+        </form>
+
+        <div id="error" class="alert alert-error hidden" role="alert"></div>
+        <div id="notice" class="alert alert-info hidden" role="status"></div>
+
+        <div id="skeleton" class="skeleton hidden" aria-hidden="true">
+          <div class="skel skel-thumb"></div>
+          <div class="skel-lines">
+            <div class="skel skel-line w-80"></div>
+            <div class="skel skel-line w-50"></div>
+            <div class="skel skel-line w-60"></div>
+          </div>
+        </div>
+
+        <div id="video-panel" class="video-panel hidden">
+          <div class="video-summary">
+            <div class="thumb-wrap">
+              <img id="thumb" alt="Video thumbnail">
+              <span id="duration-badge" class="duration-badge">--:--</span>
+            </div>
+            <div class="video-meta">
+              <h3 id="video-title">Video title</h3>
+              <p id="video-channel" class="muted">Channel</p>
+              <div class="meta-row">
+                <span id="quality-source" class="meta-chip">Quality source</span>
+                <span id="video-link-wrap" class="meta-chip meta-chip-link hidden"><a id="video-link" href="#" target="_blank" rel="noopener">Open on YouTube</a></span>
+              </div>
+              <div id="copyright-banner" class="copyright-banner neutral">
+                <div class="copyright-icon">🛡️</div>
+                <div>
+                  <div id="copyright-title" class="copyright-title">Copyright safety check</div>
+                  <div id="copyright-detail" class="copyright-detail">Load a video to run automated pre-checks.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Modes">
+            <button class="tab active" data-tab="download" role="tab" aria-selected="true">Full Video Download</button>
+            <button class="tab" data-tab="clips" role="tab" aria-selected="false">Viral Clips Studio</button>
+          </div>
+
+          <section id="tab-download" class="tab-panel active" role="tabpanel">
+            <div class="panel-head">
+              <h4>Available YouTube Qualities</h4>
+              <p class="muted small">Detected directly from available YouTube formats before download.</p>
+            </div>
+            <div id="quality-grid" class="quality-grid"></div>
+          </section>
+
+          <section id="tab-clips" class="tab-panel" role="tabpanel">
+            <div class="panel-head row-head">
+              <div>
+                <h4>Viral Clips Generator</h4>
+                <p class="muted small">Analyzes the full video locally to pick multiple high-potential moments (audio energy + scene changes). No AI, no external APIs.</p>
+              </div>
+              <button id="generate-clips-btn" class="btn btn-primary">
+                <span class="btn-label">Generate Viral Clips</span>
+                <span class="btn-spinner" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div id="clips-blocked" class="alert alert-warning hidden"></div>
+
+            <div id="clips-progress" class="progress-card hidden">
+              <div class="progress-top">
+                <span id="clips-progress-text">Preparing...</span>
+                <span id="clips-progress-pct">0%</span>
+              </div>
+              <div class="progress-bar"><div id="clips-progress-fill" class="progress-fill" style="width:0%"></div></div>
+            </div>
+
+            <div id="clips-empty" class="empty-state hidden">
+              <div class="empty-icon">🎬</div>
+              <div>
+                <strong>No clips yet</strong>
+                <p class="muted small">Load a copyright-cleared video and generate multiple viral-ready clips.</p>
+              </div>
+            </div>
+
+            <div id="clips-list" class="clips-list"></div>
+          </section>
+        </div>
+      </div>
     </section>
+
+    <section class="features container" id="features">
+      <div class="section-head">
+        <h2>Built for speed, quality, and safety</h2>
+        <p class="muted">A premium local workflow inspired by modern downloader tools.</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <div class="feature-icon">⚡</div>
+          <h3>Faster Processing</h3>
+          <p>Concurrent fragment downloads, tuned analysis, and streamlined rendering for quicker results.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">🧩</div>
+          <h3>Multiple Viral Clips</h3>
+          <p>Automatically segments long videos into several diverse high-potential moments instead of just one.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">🎞️</div>
+          <h3>Every Available Quality</h3>
+          <p>Surfaces all detected YouTube resolutions/formats so you can choose 1080p, 1440p, 4K and more before download.</p>
+        </article>
+        <article class="feature-card" id="safety">
+          <div class="feature-icon">🛡️</div>
+          <h3>Copyright Safety Gate</h3>
+          <p>Automated pre-download checks block clip downloads when potential copyright signals are detected. No guarantees, maximum caution.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer class="footer container">
+      <p>VidGrab runs locally on your machine. First load may take 1–2 minutes while the downloader initializes. Use only content you have rights to download and share.</p>
+    </footer>
   </main>
 
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-
-  <script src="/static/app.js"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

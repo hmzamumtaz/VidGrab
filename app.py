@@ -320,13 +320,26 @@ def build_quality_options(info):
             f"bv*[height<={h}]+ba/"
             f"b[height<={h}]/b"
         )
+        # detect fps/ext hints
+        fps_vals = [f.get('fps') for f in v_candidates if f.get('fps')]
+        max_fps = None
+        try:
+            if fps_vals:
+                max_fps = int(max(float(x) for x in fps_vals if x))
+        except Exception:
+            max_fps = None
+        note_parts = ['MP4']
+        if max_fps and max_fps > 30:
+            note_parts.append(f'{max_fps}fps')
         options.append({
             'height': h,
             'label': quality_label(h),
             'ext': 'mp4',
             'size': total,
-            'size_text': ("~" + fmt_bytes(total)) if fmt_bytes(total) else "Size unknown",
-            'format': fmt
+            'size_text': ("~" + fmt_bytes(total)) if fmt_bytes(total) else "Size unavailable",
+            'format': fmt,
+            'note': ' • '.join(note_parts),
+            'source': 'YouTube'
         })
     if not options:
         options = [{
@@ -334,8 +347,10 @@ def build_quality_options(info):
             'label': 'Best Available',
             'ext': 'mp4',
             'size': None,
-            'size_text': 'Size unknown',
-            'format': 'bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b'
+            'size_text': 'Size unavailable',
+            'format': 'bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+            'note': 'MP4',
+            'source': 'YouTube'
         }]
     return options
 
@@ -514,6 +529,109 @@ def api_health():
     })
 
 
+def assess_copyright_profile(info):
+    """Best-effort automated copyright/risk screening from available metadata (no external APIs/AI).
+    Returns dict with risk/allow_download/reasons. Not legal advice or a guarantee."""
+    reasons = []
+    risk = 'low'
+    allow = True
+    license_str = (info.get('license') or '').strip()
+    track = (info.get('track') or '').strip()
+    artist = (info.get('artist') or info.get('creator') or info.get('uploader') or '').strip()
+    album = (info.get('album') or '').strip()
+    categories = info.get('categories') or []
+    if isinstance(categories, str):
+        categories = [categories]
+    categories_l = [str(c).lower() for c in categories]
+
+    # Strong music/copyright signals
+    if track:
+        reasons.append(f'Detected track metadata: "{track}"')
+        risk = 'high'
+        allow = False
+    if artist and (track or album or 'music' in categories_l):
+        if f'Artist/creator metadata present ({artist})' not in reasons:
+            reasons.append(f'Artist/creator metadata present ({artist})')
+        risk = 'high'
+        allow = False
+    if album:
+        reasons.append(f'Album metadata detected: "{album}"')
+        risk = 'high'
+        allow = False
+    if 'music' in categories_l:
+        reasons.append('Category indicates music content')
+        risk = 'high'
+        allow = False
+
+    # License signals
+    if license_str:
+        lic_l = license_str.lower()
+        if 'creative commons' in lic_l:
+            reasons.append(f'License: {license_str}')
+            # CC is safer but not a full guarantee (e.g. third-party elements) -> allow only if no music signals
+            if allow:
+                risk = 'low'
+        else:
+            reasons.append(f'License: {license_str}')
+            if risk == 'low':
+                risk = 'medium'
+            # be strict for clip downloads to avoid copyright issues
+            if not track and 'music' not in categories_l:
+                # standard YouTube license / unknown - still potential claims
+                risk = 'high'
+                allow = False
+    else:
+        if risk == 'low':
+            reasons.append('No explicit reuse license detected')
+            risk = 'medium'
+            allow = False
+
+    # additional caution for very short/official-looking music uploads keywords
+    title = (info.get('title') or '').lower()
+    if any(k in title for k in ['official video', 'official audio', 'lyric video', 'music video', 'full album']):
+        if 'Title suggests official/music release' not in reasons:
+            reasons.append('Title suggests official/music release')
+        risk = 'high'
+        allow = False
+
+    if allow and risk == 'low' and not reasons:
+        reasons.append('No copyright-risk signals detected in available metadata')
+
+    status = 'clear' if allow else 'blocked'
+    return {
+        'status': status,
+        'risk': risk,
+        'allow_clip_downloads': allow,
+        'reasons': reasons[:6],
+        'note': 'Automated pre-check based on available metadata only; not a legal guarantee of copyright clearance.'
+    }
+
+
+
+# Simple in-memory cache to avoid repeated expensive yt-dlp metadata fetches
+_INFO_CACHE = {}
+_INFO_CACHE_LOCK = threading.Lock()
+_INFO_CACHE_TTL = 600
+
+
+def get_cached_video_info(url):
+    now = time.time()
+    key = url.strip()
+    with _INFO_CACHE_LOCK:
+        item = _INFO_CACHE.get(key)
+        if item and now - item.get('ts', 0) < _INFO_CACHE_TTL:
+            return item.get('info')
+    info = get_video_info(url)
+    with _INFO_CACHE_LOCK:
+        _INFO_CACHE[key] = {'ts': now, 'info': info}
+        # prune
+        if len(_INFO_CACHE) > 40:
+            old = sorted(_INFO_CACHE.items(), key=lambda kv: kv[1].get('ts', 0))[:10]
+            for k, _ in old:
+                _INFO_CACHE.pop(k, None)
+    return info
+
+
 @app.post('/api/info')
 def api_info():
     cleanup_old_jobs()
@@ -522,8 +640,9 @@ def api_info():
     if not url or not YOUTUBE_RE.search(url):
         return jsonify({'error': 'Please provide a valid YouTube URL.'}), 400
     try:
-        info = get_video_info(url)
+        info = get_cached_video_info(url)
         qualities = build_quality_options(info)
+        copyright_profile = assess_copyright_profile(info)
         return jsonify({
             'title': info.get('title') or 'Untitled video',
             'thumbnail': info.get('thumbnail'),
@@ -532,6 +651,8 @@ def api_info():
             'uploader': info.get('uploader') or info.get('channel') or 'Unknown channel',
             'webpage_url': info.get('webpage_url') or url,
             'qualities': qualities,
+            'quality_source': 'Fetched from available YouTube formats',
+            'copyright': copyright_profile,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -572,6 +693,7 @@ def _run_download_job(job_id, url, fmt, label, title_in):
                 '--newline',
                 '--no-warnings', '--no-playlist',
                 '--retries', '10', '--fragment-retries', '10', '--socket-timeout', '30',
+                '-N', '4', '--concurrent-fragments', '4',
                 '-f', use_fmt,
                 '-o', outtmpl,
                 '--merge-output-format', 'mp4',
@@ -772,7 +894,9 @@ def analyze_audio_energy(path, window=1.0):
 
 
 def analyze_scene_changes(path):
-    cmd = [FFMPEG, '-hide_banner', '-i', str(path), '-filter:v', "select='gt(scene,0.30)',showinfo", '-an', '-f', 'null', '-']
+    # Downscale for faster scene analysis while keeping timing accurate
+    vf = "scale=-2:360,select='gt(scene,0.32)',showinfo"
+    cmd = [FFMPEG, '-hide_banner', '-i', str(path), '-an', '-sn', '-dn', '-filter:v', vf, '-f', 'null', '-']
     try:
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1800)
     except Exception:
@@ -818,33 +942,48 @@ def choose_segments(source_path, job_id):
             scene_density[j] += 1.0
     max_s = max(scene_density) or 1.0
     combined = [(smooth[i] / max_e) * 0.7 + (scene_density[i] / max_s) * 0.3 for i in range(n)]
-    if duration <= 90:
-        clip_len = max(15, min(35, int(duration * 0.55)))
+    if duration <= 45:
+        clip_len = max(12, min(20, int(duration * 0.6)))
         count = 2
+    elif duration <= 120:
+        clip_len = max(18, min(30, int(duration * 0.35)))
+        count = 3
     elif duration <= 300:
-        clip_len = 30
+        clip_len = 28
         count = 4
-    elif duration <= 900:
-        clip_len = 35
+    elif duration <= 600:
+        clip_len = 30
         count = 5
-    else:
-        clip_len = 45
+    elif duration <= 1200:
+        clip_len = 32
         count = 6
+    elif duration <= 2400:
+        clip_len = 35
+        count = 8
+    else:
+        clip_len = 40
+        count = 10
     clip_len = min(clip_len, max(12, int(duration) - 1))
     win_bins = max(5, int(clip_len / w))
     candidates = []
     limit = max(1, n - win_bins + 1)
-    for i in range(0, limit):
+    stride = 1
+    if duration > 1800:
+        stride = 2
+    if duration > 3600:
+        stride = 3
+    for i in range(0, limit, stride):
         seg = combined[i:i + win_bins]
         if not seg:
             continue
         score = sum(seg) / len(seg)
         center = (i + win_bins / 2) / max(1, n)
-        score += 0.05 * (1 - abs(center - 0.5) * 2)
+        # slight preference for middle but keep diversity
+        score += 0.03 * (1 - abs(center - 0.5) * 2)
         candidates.append((score, i * w, min(duration, (i + win_bins) * w)))
     candidates.sort(reverse=True)
     segments = []
-    min_gap = 3.0
+    min_gap = 2.0
     for score, s, e in candidates:
         if len(segments) >= count:
             break
@@ -896,7 +1035,7 @@ def generate_clips_for_video(source_path, job_id):
             '-i', str(source_path),
             '-t', f"{dur:.3f}",
             '-map', '0:v:0', '-map', '0:a?',
-            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',
         ]
         if has_audio:
@@ -959,6 +1098,7 @@ def _run_clips_job(job_id, url, title_in):
                 '--newline',
                 '--no-warnings', '--no-playlist',
                 '--retries', '10', '--fragment-retries', '10', '--socket-timeout', '30',
+                '-N', '4', '--concurrent-fragments', '4',
                 '-f', use_fmt,
                 '-o', str(src_path),
                 '--merge-output-format', 'mp4',
@@ -1027,11 +1167,25 @@ def _run_clips_job(job_id, url, title_in):
             if not ok:
                 raise RuntimeError(f'Source video is not playable: {info_or_err}')
 
+        # We only reach here if pre-check allowed; still mark explicitly
+        cp = {}
+        try:
+            cp = assess_copyright_profile(get_cached_video_info(url))
+        except Exception:
+            cp = {'allow_clip_downloads': False, 'risk': 'high', 'status': 'blocked', 'reasons': ['Safety verification unavailable'], 'note': 'Automated pre-check unavailable.'}
         clips = generate_clips_for_video(src_path, job_id)
         if not clips:
             raise RuntimeError('Could not generate clips from this video.')
-        result = {'title': title, 'clips': clips, 'count': len(clips)}
-        update_job(job_id, status='done', phase='done', progress=100, message=f'Generated {len(clips)} clip(s)', result=result)
+        allow = bool(cp.get('allow_clip_downloads'))
+        for c in clips:
+            c['download_allowed'] = allow
+            c['copyright_status'] = 'cleared' if allow else 'blocked'
+            c['copyright_note'] = 'Passed automated pre-download safety check' if allow else 'Blocked by automated copyright safety check'
+        result = {'title': title, 'clips': clips, 'count': len(clips), 'copyright': cp}
+        msg = f'Generated {len(clips)} clip(s)'
+        if not allow:
+            msg += ' (downloads blocked by safety check)'
+        update_job(job_id, status='done', phase='done', progress=100, message=msg, result=result)
     except Exception as e:
         update_job(job_id, status='error', phase='error', progress=100, message='Clip generation failed', error=str(e))
     finally:
@@ -1057,6 +1211,15 @@ def api_clips_start():
     title = (data.get('title') or '').strip()
     if not url or not YOUTUBE_RE.search(url):
         return jsonify({'error': 'Please provide a valid YouTube URL.'}), 400
+    # Best-effort copyright pre-check (metadata-based, no external APIs). Block clip generation/download flow if risk detected.
+    try:
+        info = get_cached_video_info(url)
+        cp = assess_copyright_profile(info)
+        if not cp.get('allow_clip_downloads'):
+            return jsonify({'error': 'Copyright safety check blocked clip generation for this video (potential copyrighted content detected).', 'copyright': cp}), 403
+    except Exception:
+        # If we cannot verify, be strict to avoid potential copyright issues
+        return jsonify({'error': 'Copyright safety check could not be completed. Clip generation is blocked to avoid potential copyright issues.'}), 403
     job_id = create_job('clips')
     t = threading.Thread(target=_run_clips_job, args=(job_id, url, title), daemon=True)
     t.start()
