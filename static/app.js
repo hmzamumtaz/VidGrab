@@ -41,6 +41,7 @@
 
   const state = {
     url: '',
+    previewId: '',
     info: null,
     copyright: null,
     clipsAllowed: false,
@@ -194,6 +195,34 @@
   const CLIPS_EMPTY_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.7 7.6L20 18M8.7 16.4L20 6"/></svg>';
   const QUALITY_EMPTY_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none"/></svg>';
 
+  async function startQualityDownload(q) {
+    if (state.previewId && q.nonce && q.fmt != null) {
+      try {
+        const start = await api('/api/fetch', {
+          method: 'POST',
+          body: JSON.stringify({ preview_id: state.previewId, fmt: q.fmt, nonce: q.nonce, stream: 1 })
+        });
+        const jobId = start.job_id || start.data?.job_id;
+        if (jobId) return jobId;
+      } catch (e) {
+        if (![400, 404, 410].includes(e.status)) throw e;
+      }
+    }
+    const start = await api('/api/download/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        url: state.url,
+        format: q.format,
+        format_id: q.format_id || '',
+        height: q.height || null,
+        client_args: state.info?.client_args || [],
+        label: q.label || 'video',
+        title: state.info?.title || ''
+      })
+    });
+    return start.job_id;
+  }
+
   function setCopyright(cp) {
     state.copyright = cp || null;
     const allowed = !!(cp && cp.allow_clip_downloads);
@@ -256,6 +285,8 @@
     qualities.forEach((q, index) => {
       const card = el('article', `ytx-format-card${index === recommended ? ' is-recommended' : ''}`);
       card.setAttribute('aria-label', `${q.label || 'Quality'} download`);
+      if (q.force_url) card.dataset.force = q.force_url;
+      if (q.fmt != null) card.dataset.fmt = q.fmt;
       const top = el('div', 'ytx-format-top');
       const icon = el('div', 'ytx-fmt-icon', shortResolution(q));
       icon.setAttribute('aria-hidden', 'true');
@@ -303,17 +334,8 @@
         btn.disabled = true; btn.classList.add('loading');
         prog.classList.remove('hidden'); fill.style.width = '2%'; ptxt.textContent = 'Starting...';
         try {
-          const payload = {
-            url: state.url,
-            format: q.format,
-            format_id: q.format_id || '',
-            height: q.height || null,
-            client_args: state.info?.client_args || [],
-            label: q.label || 'video',
-            title: state.info?.title || ''
-          };
-          const start = await api('/api/download/start', { method: 'POST', body: JSON.stringify(payload) });
-          const job = await pollJob(start.job_id, (j) => {
+          const jobId = await startQualityDownload(q);
+          const job = await pollJob(jobId, (j) => {
             const p = Math.max(0, Math.min(100, Number(j.progress || 0)));
             fill.style.width = `${p}%`; ptxt.textContent = j.message || `${Math.round(p)}%`;
           });
@@ -387,8 +409,16 @@
     clearError(); showClipsError('');
     setBusy(true);
     try {
-      const info = await api('/api/info', { method: 'POST', body: JSON.stringify({ url }) });
-      state.url = info.webpage_url || url;
+      let resolved;
+      try {
+        resolved = await api('/api/resolve', { method: 'POST', body: JSON.stringify({ video_url: url }) });
+      } catch (e) {
+        if (![404, 405].includes(e.status)) throw e;
+        resolved = await api('/api/info', { method: 'POST', body: JSON.stringify({ url }) });
+      }
+      const info = resolved.data || resolved;
+      state.previewId = info.preview_id || '';
+      state.url = info.webpage_url || info.video_url || url;
       state.info = info;
       thumb.src = info.thumbnail || '';
       thumb.alt = info.title ? `Thumbnail for ${info.title}` : 'Video thumbnail';

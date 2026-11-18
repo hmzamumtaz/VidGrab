@@ -68,6 +68,9 @@ Then open: [http://127.0.0.1:5050](http://127.0.0.1:5050)
 ### Quality detection
 VidGrab inspects available YouTube formats via `yt-dlp` metadata and builds selectable quality options (with compatibility-focused MP4 format selection and size estimates when available). Downloads use exact format IDs from the same metadata fetch, with generic fallback selectors, to avoid “Requested format is not available” errors.
 
+### Two-step resolve/download flow
+VidGrab mirrors the standard downloader flow without using any private third-party endpoints: paste a link → `/api/resolve` creates a short-lived preview session (`preview_id`) and tokenized format options → clicking Download calls `/api/fetch` with that session, format index, and nonce → the backend performs the actual YouTube fetch/merge with `yt-dlp` and `ffmpeg`, then serves the final MP4. Tokens expire after 15 minutes and are bound to one preview session and format. `/api/info` and `/api/download/start` remain available for compatibility.
+
 ### Viral clip generation (heuristic, no AI)
 1. Downloads a source copy for analysis (with retries/fallback formats)
 2. Analyzes audio energy and scene changes locally

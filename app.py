@@ -1065,6 +1065,61 @@ def get_cached_video_info(url):
     return info
 
 
+_PREVIEW_CACHE = {}
+_PREVIEW_LOCK = threading.Lock()
+_PREVIEW_TTL = 900
+
+
+def prune_preview_sessions(now=None):
+    now = now or time.time()
+    with _PREVIEW_LOCK:
+        expired = [pid for pid, item in _PREVIEW_CACHE.items() if now - item.get('ts', 0) > _PREVIEW_TTL]
+        for pid in expired:
+            _PREVIEW_CACHE.pop(pid, None)
+
+
+def create_preview_session(url, info, qualities):
+    now = time.time()
+    preview_id = uuid.uuid4().hex
+    tokens = {}
+    enriched = []
+    for index, quality in enumerate(qualities):
+        item = dict(quality)
+        fmt = str(index)
+        nonce = uuid.uuid4().hex
+        item['fmt'] = fmt
+        item['nonce'] = nonce
+        item['force_url'] = f"/api/fetch?pid={preview_id}&fmt={fmt}&nonce={nonce}&stream=1"
+        tokens[nonce] = {
+            'fmt': fmt,
+            'payload': {
+                'url': url,
+                'format': item.get('format') or '',
+                'format_id': item.get('format_id') or '',
+                'height': item.get('height'),
+                'label': item.get('label') or 'video',
+                'title': info.get('title') or '',
+                'client_args': info.get('_vidgrab_client_args') or [],
+            },
+        }
+        enriched.append(item)
+    prune_preview_sessions(now)
+    with _PREVIEW_LOCK:
+        _PREVIEW_CACHE[preview_id] = {'ts': now, 'url': url, 'info': info, 'tokens': tokens}
+    return preview_id, enriched
+
+
+def get_download_token(preview_id, fmt, nonce):
+    with _PREVIEW_LOCK:
+        session = _PREVIEW_CACHE.get(str(preview_id or ''))
+        if not session or time.time() - session.get('ts', 0) > _PREVIEW_TTL:
+            return None
+        entry = session.get('tokens', {}).get(str(nonce or ''))
+        if not entry or str(entry.get('fmt')) != str(fmt):
+            return None
+        return entry.get('payload')
+
+
 @app.post('/api/info')
 def api_info():
     cleanup_old_jobs()
@@ -1090,6 +1145,39 @@ def api_info():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.post('/api/resolve')
+def api_resolve():
+    cleanup_old_jobs()
+    data = request.get_json(force=True, silent=True) or {}
+    url = str(data.get('video_url') or data.get('url') or '').strip()
+    if not url or not YOUTUBE_RE.search(url):
+        return jsonify({'success': False, 'error': 'Please provide a valid YouTube URL.'}), 400
+    try:
+        info = get_cached_video_info(url)
+        qualities = build_quality_options(info)
+        preview_id, qualities = create_preview_session(url, info, qualities)
+        payload = {
+            'preview_id': preview_id,
+            'video_url': url,
+            'title': info.get('title') or 'Untitled video',
+            'thumbnail': info.get('thumbnail'),
+            'duration': info.get('duration'),
+            'duration_text': fmt_duration(info.get('duration')),
+            'uploader': info.get('uploader') or info.get('channel') or 'Unknown channel',
+            'webpage_url': info.get('webpage_url') or url,
+            'qualities': qualities,
+            'quality_source': 'Fetched from available YouTube formats',
+            'download_endpoint': '/api/fetch',
+            'client_args': info.get('_vidgrab_client_args') or [],
+            'copyright': assess_copyright_profile(info),
+        }
+        response = {'success': True, 'data': payload}
+        response.update(payload)
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.get('/api/job/<job_id>')
@@ -1290,6 +1378,32 @@ def api_download_start():
     t = threading.Thread(target=_run_download_job, args=(job_id, url, fmt, label, title, format_id, height, client_args), daemon=True)
     t.start()
     return jsonify({'job_id': job_id})
+
+
+@app.route('/api/fetch', methods=['GET', 'POST'])
+def api_fetch():
+    cleanup_old_jobs()
+    json_data = request.get_json(force=True, silent=True)
+    data = dict(json_data) if isinstance(json_data, dict) and json_data else request.values.to_dict()
+    preview_id = str(data.get('preview_id') or data.get('pid') or '').strip()
+    fmt = str(data.get('fmt') or '').strip()
+    nonce = str(data.get('nonce') or data.get('token') or '').strip()
+    payload = get_download_token(preview_id, fmt, nonce)
+    if not payload:
+        return jsonify({'success': False, 'error': 'This download session expired. Paste the link again.'}), 410
+    job_id = create_job('download')
+    t = threading.Thread(target=_run_download_job, args=(
+        job_id,
+        payload.get('url') or '',
+        payload.get('format') or '',
+        payload.get('label') or 'video',
+        payload.get('title') or '',
+        payload.get('format_id') or None,
+        payload.get('height'),
+        payload.get('client_args') or [],
+    ), daemon=True)
+    t.start()
+    return jsonify({'success': True, 'job_id': job_id, 'data': {'job_id': job_id}})
 
 
 # --- Clips ---
