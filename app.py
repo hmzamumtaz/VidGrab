@@ -61,24 +61,92 @@ def resolve_ffprobe():
     return str(BIN_DIR / "ffprobe")
 
 
+def _ytdlp_version_score(path):
+    # best-effort: prefer explicit latest files, else unknown
+    name = os.path.basename(str(path))
+    if name.endswith('.latest'):
+        return 10_000_000
+    return 0
+
+
 def resolve_ytdlp():
     candidates = []
-    # Prefer system/pip yt-dlp on Linux/serverless; prefer bundled mac binary on macOS
+    # Prefer bundled/latest yt-dlp on macOS for YouTube compatibility
     if sys.platform == "darwin":
-        candidates += [str(BIN_DIR / "yt-dlp_macos"), str(BIN_DIR / "yt-dlp")]
+        candidates += [str(BIN_DIR / "yt-dlp_macos.latest"), str(BIN_DIR / "yt-dlp_macos"), str(BIN_DIR / "yt-dlp")]
     candidates += [_which("yt-dlp")]
     if sys.platform != "darwin":
-        candidates += [str(BIN_DIR / "yt-dlp_macos"), str(BIN_DIR / "yt-dlp")]
+        candidates += [str(BIN_DIR / "yt-dlp_macos.latest"), str(BIN_DIR / "yt-dlp_macos"), str(BIN_DIR / "yt-dlp")]
     candidates += [os.path.expanduser("~/Library/Python/3.9/bin/yt-dlp")]
+    # unique preserving order
+    seen = set()
+    uniq = []
     for c in candidates:
-        if _is_executable(c):
-            _dequarantine(c)
-            return c
-    # fallback to python module invocation path marker handled elsewhere? return best guess
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        uniq.append(c)
+    # pick best executable: prefer .latest then first executable
+    execs = [c for c in uniq if _is_executable(c)]
+    if execs:
+        execs.sort(key=lambda c: (-_ytdlp_version_score(c), uniq.index(c)))
+        best = execs[0]
+        _dequarantine(best)
+        return best
     found = _which("yt-dlp")
     if found:
         return found
     return str(BIN_DIR / "yt-dlp_macos")
+
+
+def resolve_js_runtime_arg():
+    # Allow explicit override
+    jsr = os.environ.get('VIDGRAB_JS_RUNTIMES') or os.environ.get('YTDLP_JS_RUNTIMES')
+    if jsr:
+        return str(jsr).strip()
+    # Prefer bundled deno, then system runtimes
+    candidates = [
+        ('deno', str(BIN_DIR / 'deno')),
+        ('deno', _which('deno')),
+        ('node', _which('node')),
+        ('bun', _which('bun')),
+        ('quickjs', _which('qjs') or _which('quickjs')),
+    ]
+    for name, path in candidates:
+        if path and _is_executable(path):
+            _dequarantine(path)
+            return f"{name}:{path}"
+        if path and name != 'deno':
+            # system name may be fine even if not absolute/executable-checked oddly
+            return name
+    # last resort: try 'deno' by name (yt-dlp may find it)
+    if _which('deno'):
+        return 'deno'
+    return None
+
+
+def detect_cookie_file():
+    env = os.environ.get('VIDGRAB_COOKIES') or os.environ.get('YTDLP_COOKIES')
+    if env:
+        try:
+            if os.path.exists(str(env)):
+                return str(env)
+        except Exception:
+            pass
+    candidates = [
+        DATA_DIR / 'cookies.txt',
+        BASE_DIR / 'cookies.txt',
+        Path.cwd() / 'cookies.txt',
+        Path.home() / 'Downloads' / 'cookies.txt',
+        Path.home() / 'youtube_cookies.txt',
+    ]
+    for p in candidates:
+        try:
+            if p.exists() and p.is_file() and p.stat().st_size > 0:
+                return str(p)
+        except Exception:
+            pass
+    return None
 
 
 FFMPEG = resolve_ffmpeg()
@@ -91,17 +159,21 @@ YOUTUBE_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+', re.I
 COMMON_YTDLP_ARGS = ['--ignore-config', '--no-cache-dir', '--no-progress']
 
 
-def ytdlp_auth_args():
+def ytdlp_extra_args():
     args = []
-    cookies = os.environ.get('VIDGRAB_COOKIES') or os.environ.get('YTDLP_COOKIES')
-    if not cookies:
-        for p in [DATA_DIR / 'cookies.txt', BASE_DIR / 'cookies.txt']:
-            try:
-                if p.exists() and p.is_file():
-                    cookies = str(p)
-                    break
-            except Exception:
-                pass
+    # Enable JS runtime/challenge solving when available (improves YouTube reliability)
+    jsr = resolve_js_runtime_arg()
+    if jsr:
+        args += ['--js-runtimes', str(jsr)]
+    rcomp = os.environ.get('VIDGRAB_REMOTE_COMPONENTS') or os.environ.get('YTDLP_REMOTE_COMPONENTS')
+    if rcomp:
+        args += ['--remote-components', str(rcomp).strip()]
+    return args
+
+
+def ytdlp_auth_args():
+    args = list(ytdlp_extra_args())
+    cookies = detect_cookie_file()
     if cookies:
         try:
             if os.path.exists(str(cookies)):
@@ -111,36 +183,37 @@ def ytdlp_auth_args():
     cfb = os.environ.get('VIDGRAB_COOKIES_FROM_BROWSER') or os.environ.get('YTDLP_COOKIES_FROM_BROWSER')
     if cfb:
         args += ['--cookies-from-browser', str(cfb).strip()]
-    jsr = os.environ.get('VIDGRAB_JS_RUNTIMES') or os.environ.get('YTDLP_JS_RUNTIMES')
-    if jsr:
-        args += ['--js-runtimes', str(jsr).strip()]
     return args
 
 
 YTDLP_PLAYER_CLIENT_STRATEGIES = [
     [],
-    ['--extractor-args', 'youtube:player_client=default,ios,android'],
-    ['--extractor-args', 'youtube:player_client=web_embedded,ios,android'],
+    ['--extractor-args', 'youtube:player_client=default,-web_safari'],
+    ['--extractor-args', 'youtube:player_client=android,ios'],
     ['--extractor-args', 'youtube:player_client=tv_embedded,mediaconnect'],
-    ['--extractor-args', 'youtube:player_client=tv,ios'],
 ]
 
 
 def is_youtube_bot_check_error(text):
     t = (text or '').lower()
-    return ('sign in to confirm' in t and "not a bot" in t) or 'use --cookies-from-browser or --cookies' in t
+    return (
+        ('sign in to confirm' in t and "not a bot" in t)
+        or 'use --cookies-from-browser or --cookies' in t
+        or "confirm you\u2019re not a bot" in t
+    )
 
 
 def friendly_ytdlp_error(msg):
     msg = (msg or '').strip()
     if is_youtube_bot_check_error(msg):
         hint = (
-            "YouTube requested sign-in/bot verification for this request. "
-            "If this persists, export YouTube cookies to cookies.txt in the app folder "
-            "or set VIDGRAB_COOKIES / VIDGRAB_COOKIES_FROM_BROWSER, then retry."
+            "YouTube blocked this request with a bot/sign-in check. "
+            "Try again first (VidGrab now retries multiple clients). "
+            "If it still fails: export your YouTube cookies as cookies.txt into the app folder "
+            f"({BASE_DIR}/cookies.txt) or set VIDGRAB_COOKIES=/path/to/cookies.txt, then retry."
         )
         if msg:
-            return f"{hint} Details: {msg}"[:900]
+            return f"{hint} Details: {msg}"[:1000]
         return hint
     return msg
 
