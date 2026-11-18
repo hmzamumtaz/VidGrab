@@ -33,3 +33,11 @@ Then open http://127.0.0.1:5050
 - Clip generation and full downloads run locally and may take several minutes depending on video length/quality and network speed.
 - Output files are saved in `downloads/` (temporary analysis source in `tmp/`).
 - YouTube/platform changes can break extraction; update `yt-dlp` if needed: `python3 -m pip install --user -U yt-dlp`.
+
+## Vercel deployment notes
+This project is a Flask app with long-running download/clip jobs and `ffmpeg/ffprobe` dependencies. A Vercel config (`vercel.json` + `api/index.py`) is included so the site/routes deploy correctly, but Vercel serverless has important limitations:
+- Function execution time limits may interrupt long downloads/clip generation.
+- In-memory job state and `/tmp` storage are ephemeral (not suitable for multi-request/background processing at scale).
+- Bundled binaries in `bin/` are macOS builds; Vercel runs Linux, so `ffmpeg/ffprobe`/mac `yt-dlp` may be unavailable unless provided in the runtime. `yt-dlp` is installed from `requirements.txt`.
+
+For full functionality (progress jobs, large downloads, clip rendering), run locally: `python3 app.py`.
